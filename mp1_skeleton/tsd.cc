@@ -64,7 +64,7 @@ using csce438::ListReply;
 using csce438::Request;
 using csce438::Reply;
 using csce438::SNSService;
-
+using namespace std;
 
 struct Client {
   std::string username;
@@ -111,10 +111,37 @@ class SNSServiceImpl final : public SNSService::Service {
   // RPC Login
   Status Login(ServerContext* context, const Request* request, Reply* reply) override {
 
-    /*********
-    YOUR CODE HERE
-    **********/
-    
+    // get the username from the request
+    string username = request->username();
+    cout<<username<<" is trying to connect."<<endl;
+    string reply_msg;
+    // check if the username is already in the database
+    int user_idx=-1;
+    for(int i=0; i<client_db.size(); i++){
+      if(client_db[i].username == username){
+        user_idx = i;
+        break;
+      }
+    }
+    if(user_idx == -1){ // not exist, create a new client
+      Client new_client;
+      new_client.username = username;
+      client_db.push_back(new_client);
+      reply_msg = "registered and logged in successfully.";
+      reply->set_msg(reply_msg);
+    }else{  // exist
+      Client *user = &client_db[user_idx];
+      if(user->connected){
+        reply_msg = "invalid username(Already exists).";
+        reply->set_msg(reply_msg);
+      }else{
+        user->connected = true;
+        reply_msg = "logged in successfully.";
+        reply->set_msg(reply_msg);
+      }
+    }
+    cout<< username + " " + reply_msg << endl;
+
     return Status::OK;
   }
 

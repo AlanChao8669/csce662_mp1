@@ -20,6 +20,7 @@ using csce438::ListReply;
 using csce438::Request;
 using csce438::Reply;
 using csce438::SNSService;
+using namespace std;
 
 void sig_ignore(int sig) {
   std::cout << "Signal caught " + sig;
@@ -82,10 +83,32 @@ int Client::connectTo()
   // ------------------------------------------------------------
     
 ///////////////////////////////////////////////////////////
-// YOUR CODE HERE
-//////////////////////////////////////////////////////////
+  string target = hostname + ":" + port;
+  // Create a channel.
+  std::shared_ptr<Channel> channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+  // Create a client stub.
+  stub_ = SNSService::NewStub(channel,grpc::StubOptions());
+  cout << "Complete creating a client stub." << endl;
 
-    return 1;
+  // Login
+  ClientContext context;
+  Request request;
+  Reply reply;
+  request.set_username(username);
+  stub_->Login(&context, request, &reply);
+
+  if(reply.msg().empty()){
+    cout<< "Server reply empty." << endl;
+    return -1;
+  }else{
+    cout<< reply.msg() << endl;
+    if(reply.msg() == "invalid username(Already exists).") {
+      return -1;
+    }else{
+      return 1;
+    }
+  }
+
 }
 
 IReply Client::processCommand(std::string& input)
@@ -190,10 +213,17 @@ IReply Client::UnFollow(const std::string& username2) {
 IReply Client::Login() {
 
     IReply ire;
-  
-    /***
-     YOUR CODE HERE
-    ***/
+
+    // Clientcontext context;
+    // Request request;
+    // Reply reply;
+
+    // Status status = stub_->Login(&context, request, &reply); // use stub to call server-side Login method.
+    // if (reply.msg() == "you have already joined") {
+    //     Connection failed;
+    // } else {
+    //     Connection succeeded;
+    // }
 
     return ire;
 }
