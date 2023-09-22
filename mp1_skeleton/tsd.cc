@@ -85,9 +85,13 @@ std::vector<Client> client_db;
 class SNSServiceImpl final : public SNSService::Service {
   
   Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
-    /*********
-    YOUR CODE HERE
-    **********/
+    string username = request->username();
+    cout<< username << " use List cmd."<< endl;
+    // get all users
+    for(Client c : client_db){
+      list_reply->add_all_users(c.username);
+    }
+
     return Status::OK;
   }
 

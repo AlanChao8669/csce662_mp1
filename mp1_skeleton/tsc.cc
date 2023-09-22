@@ -160,9 +160,11 @@ IReply Client::processCommand(std::string& input)
 
     IReply ire;
     
-    /*********
-    YOUR CODE HERE
-    **********/
+    string cmd = input.substr(0, input.find(" "));
+    cout<<"processCommand: "<< cmd<< endl;
+    if(cmd == "LIST"){
+      return List();
+    }
 
     return ire;
 }
@@ -176,13 +178,28 @@ void Client::processTimeline()
 // List Command
 IReply Client::List() {
 
-    IReply ire;
+  IReply ire;
 
-    /*********
-    YOUR CODE HERE
-    **********/
+  ClientContext context;
+  Request request;
+  request.set_username(username);
+  ListReply listReply;
 
-    return ire;
+  // using stub to call server List() method
+  Status status = stub_->List(&context, request, &listReply);
+  if(status.ok()){
+    // set iReply.all_users, followers
+    for(string s: listReply.all_users()){
+      ire.all_users.push_back(s);
+    }
+    for(string s: listReply.followers()){
+      ire.followers.push_back(s);
+    }
+    ire.grpc_status = status;
+    ire.comm_status = SUCCESS;
+  }
+
+  return ire;
 }
 
 // Follow Command        

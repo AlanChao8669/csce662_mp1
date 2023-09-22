@@ -32,6 +32,7 @@ void IClient::displayTitle() const
   std::cout << "=====================================\n";
 }
 
+// preprocess input command
 std::string IClient::getCommand() const
 {
   std::string input;
@@ -43,16 +44,16 @@ std::string IClient::getCommand() const
       std::string cmd = input.substr(0, index);
       toUpperCase(cmd);
       if(input.length() == index+1){
-	std::cout << "Invalid Input -- No Arguments Given\n";
-	continue;
+        std::cout << "Invalid Input -- No Arguments Given\n";
+        continue;
       }
       std::string argument = input.substr(index+1, (input.length()-index));
       input = cmd + " " + argument;
     } else {
       toUpperCase(input);
       if (input != "LIST" && input != "TIMELINE") {
-	std::cout << "Invalid Command\n";
-	continue;
+        std::cout << "Invalid Command\n";
+        continue;
       }
     }
     break;
@@ -67,15 +68,15 @@ void IClient::displayCommandReply(const std::string& comm, const IReply& reply) 
     case SUCCESS:
       std::cout << "Command completed successfully\n";
       if (comm == "LIST") {
-	std::cout << "All users: ";
-	for (std::string room : reply.all_users) {
-	  std::cout << room << ", ";
-	}
-	std::cout << "\nFollowers: ";
-	for (std::string room : reply.followers) {
-	  std::cout << room << ", ";
-	}
-	std::cout << std::endl;
+        std::cout << "All users: ";
+        for (std::string room : reply.all_users) {
+          std::cout << room << ", ";
+        }
+        std::cout << "\nFollowers: ";
+        for (std::string room : reply.followers) {
+          std::cout << room << ", ";
+        }
+        std::cout << std::endl;
       }
       break;
     case FAILURE_ALREADY_EXISTS:
