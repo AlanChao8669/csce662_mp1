@@ -1,5 +1,5 @@
 #include "client.h"
-
+#include "utils.h"
 
 void IClient::run()
 {
@@ -37,18 +37,25 @@ std::string IClient::getCommand() const
 {
   std::string input;
   while (1) {
-    std::cout << "Cmd> ";
+    std::cout << "=====================================\n"<< "Cmd> ";
     std::getline(std::cin, input);
+    input = trimSpaces(input);
     std::size_t index = input.find_first_of(" ");
     if (index != std::string::npos) {
       std::string cmd = input.substr(0, index);
       toUpperCase(cmd);
+      if(cmd!= "FOLLOW" && cmd!="UNFOLLOW"){
+        std::cout << "Invalid Command\n";
+        continue;
+      }
       if(input.length() == index+1){
         std::cout << "Invalid Input -- No Arguments Given\n";
         continue;
       }
       std::string argument = input.substr(index+1, (input.length()-index));
+      argument = trimSpaces(argument);
       input = cmd + " " + argument;
+      //std::cout<< input << std::endl;
     } else {
       toUpperCase(input);
       if (input != "LIST" && input != "TIMELINE") {
@@ -66,7 +73,7 @@ void IClient::displayCommandReply(const std::string& comm, const IReply& reply) 
   if (reply.grpc_status.ok()) {
     switch (reply.comm_status) {
     case SUCCESS:
-      std::cout << "Command completed successfully\n";
+      std::cout << "Process completed\n";
       if (comm == "LIST") {
         std::cout << "All users: ";
         for (std::string room : reply.all_users) {

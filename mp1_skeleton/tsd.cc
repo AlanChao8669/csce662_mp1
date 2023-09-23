@@ -81,6 +81,16 @@ struct Client {
 //Vector that stores every client that has been created
 std::vector<Client> client_db;
 
+// find the index of the user in the client db by username
+int findClientIdx(string username){
+    for(int i=0; i<client_db.size(); i++){
+      if(client_db[i].username == username){
+        return i;
+      }
+    }
+    // user not found
+    return -1;
+}
 
 class SNSServiceImpl final : public SNSService::Service {
   
@@ -91,16 +101,51 @@ class SNSServiceImpl final : public SNSService::Service {
     for(Client c : client_db){
       list_reply->add_all_users(c.username);
     }
+    // get followes of the current user
+    Client user = client_db[findClientIdx(username)];
+    for(Client* c : user.client_followers){
+      list_reply->add_followers(c->username);
+    }
 
     return Status::OK;
   }
 
   Status Follow(ServerContext* context, const Request* request, Reply* reply) override {
 
-    /*********
-    YOUR CODE HERE
-    **********/
-    return Status::OK; 
+    string username = request->username();
+    string follow_username = request->arguments(0);
+    cout<< username << " wants to follow "<< follow_username << endl;
+
+    int user_idx = findClientIdx(username);
+    int follow_user_idx = findClientIdx(follow_username);
+    
+    string errMsg;
+    
+    if(user_idx == follow_user_idx){ // check if user want to follow himself
+      errMsg = "Error: Cannot follow yourself!";
+      cout<< errMsg << endl;
+      return Status(grpc::StatusCode::INVALID_ARGUMENT, errMsg);
+    }else if(follow_user_idx < 0){  // check if follow_user exists
+      // follow_user does not exist
+      errMsg = follow_username + " does not exist.";
+      cout<< errMsg << endl;
+      return Status(grpc::StatusCode::NOT_FOUND, errMsg);
+    }else{ // chekck if user is already following follow_user
+      Client user = client_db[user_idx];
+      for(Client* c : user.client_following){
+        if(c->username == follow_username){
+          errMsg = "Error: Already following " + follow_username;
+          cout<< errMsg << endl;
+          return Status(grpc::StatusCode::CANCELLED , errMsg);
+        }
+      }
+      // add follow_user to user's following list
+      client_db[user_idx].client_following.push_back(&client_db[follow_user_idx]);
+      client_db[follow_user_idx].client_followers.push_back(&client_db[user_idx]);
+      cout<< username << " is now following "<< follow_username << endl;
+      return Status::OK;
+    }
+    
   }
 
   Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {

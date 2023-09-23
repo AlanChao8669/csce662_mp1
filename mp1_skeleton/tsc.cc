@@ -7,6 +7,7 @@
 #include <csignal>
 #include <grpc++/grpc++.h>
 #include "client.h"
+#include "utils.h"
 
 #include "sns.grpc.pb.h"
 using grpc::Channel;
@@ -15,6 +16,7 @@ using grpc::ClientReader;
 using grpc::ClientReaderWriter;
 using grpc::ClientWriter;
 using grpc::Status;
+using grpc::StatusCode;
 using csce438::Message;
 using csce438::ListReply;
 using csce438::Request;
@@ -161,11 +163,21 @@ IReply Client::processCommand(std::string& input)
     IReply ire;
     
     string cmd = input.substr(0, input.find(" "));
-    cout<<"processCommand: "<< cmd<< endl;
+    cout<<"processCommand: "<< cmd << endl;
     if(cmd == "LIST"){
       return List();
-    }
+    }else if(cmd == "FOLLOW"){
+      string username = input.substr(input.find_first_of(" ")+1, input.length());
+      return Follow(username);
+    }else if(cmd == "UNFOLLOW"){
 
+    }else if(cmd == "TIMELINE"){
+      
+    }else{
+      // invalid command
+      ire.grpc_status = grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "invalid command");
+    }
+    
     return ire;
 }
 
@@ -187,6 +199,7 @@ IReply Client::List() {
 
   // using stub to call server List() method
   Status status = stub_->List(&context, request, &listReply);
+  ire.grpc_status = status;
   if(status.ok()){
     // set iReply.all_users, followers
     for(string s: listReply.all_users()){
@@ -195,7 +208,6 @@ IReply Client::List() {
     for(string s: listReply.followers()){
       ire.followers.push_back(s);
     }
-    ire.grpc_status = status;
     ire.comm_status = SUCCESS;
   }
 
@@ -203,15 +215,25 @@ IReply Client::List() {
 }
 
 // Follow Command        
-IReply Client::Follow(const std::string& username2) {
+IReply Client::Follow(const std::string& follow_username) {
 
-    IReply ire; 
-      
-    /***
-    YOUR CODE HERE
-    ***/
+  IReply ire;
 
-    return ire;
+  // prepare request
+  ClientContext context;
+  Request request;
+  request.set_username(username);
+  request.add_arguments(follow_username);
+  Reply reply;
+  // using stub to call server Follow() method
+  Status status = stub_->Follow(&context, request, &reply);
+  ire.grpc_status = status;
+  if(status.ok()){
+    ire.comm_status = SUCCESS;
+    cout<< "You are now following " << follow_username << endl;
+  }
+
+  return ire;
 }
 
 // UNFollow Command  
