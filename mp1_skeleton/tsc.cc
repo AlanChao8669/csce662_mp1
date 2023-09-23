@@ -170,7 +170,8 @@ IReply Client::processCommand(std::string& input)
       string username = input.substr(input.find_first_of(" ")+1, input.length());
       return Follow(username);
     }else if(cmd == "UNFOLLOW"){
-
+      string username = input.substr(input.find_first_of(" ")+1, input.length());
+      return UnFollow(username);
     }else if(cmd == "TIMELINE"){
       
     }else{
@@ -237,15 +238,25 @@ IReply Client::Follow(const std::string& follow_username) {
 }
 
 // UNFollow Command  
-IReply Client::UnFollow(const std::string& username2) {
+IReply Client::UnFollow(const std::string& unfollow_user) {
 
-    IReply ire;
+  IReply ire;
 
-    /***
-    YOUR CODE HERE
-    ***/
+  // prepare request
+  ClientContext context;
+  Request request;
+  request.set_username(username);
+  request.add_arguments(unfollow_user);
+  Reply reply;
+  // using stub to call server Follow() method
+  Status status = stub_->UnFollow(&context, request, &reply);
+  ire.grpc_status = status;
+  if(status.ok()){
+    ire.comm_status = SUCCESS;
+    cout<< "You have unfollowed " << unfollow_user << endl;
+  }
 
-    return ire;
+  return ire;
 }
 
 // Login Command  

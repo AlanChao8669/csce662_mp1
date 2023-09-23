@@ -150,11 +150,42 @@ class SNSServiceImpl final : public SNSService::Service {
 
   Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {
 
-    /*********
-    YOUR CODE HERE
-    **********/
+    string username = request->username();
+    string unfollow_username = request->arguments(0);
+    cout<< username << " wants to unfollow "<< unfollow_username << endl;
 
-    return Status::OK;
+    int user_idx = findClientIdx(username);
+    int unfollow_user_idx = findClientIdx(unfollow_username);
+    Client* user = &client_db[user_idx];
+    Client* unfollow_user = NULL;
+    string errMsg;
+
+    // check if unfollow_user is in user's following
+    for(Client* c : user->client_following){
+      if(c->username == unfollow_username){
+        unfollow_user = c;
+        break;
+      }
+    }
+    if(NULL == unfollow_user){ // not in user's following list
+      errMsg = "Error: " + unfollow_username + " is not in " + username + "'s following list.";
+      return Status(grpc::StatusCode::NOT_FOUND, errMsg);
+    }else{ // in following list
+      std::vector<Client*>::iterator pos;
+      // remove from following list
+      pos = find((user->client_following).begin(), (user->client_following).end(), unfollow_user);
+      cout<< "unfollow user addr:" << unfollow_user << endl;
+      cout<< "find addr:" << *pos << endl;
+      (user->client_following).erase(pos);
+      // remove user from unfollow_user's followers
+      pos = find(unfollow_user->client_followers.begin(), unfollow_user->client_followers.end(), user);
+      cout<< "follower user addr:" << user << endl;
+      cout<< "find addr:" << *pos << endl;
+      unfollow_user->client_followers.erase(pos);
+
+      return Status::OK;
+    }
+
   }
 
   // RPC Login
