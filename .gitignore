@@ -20,3 +20,5 @@ mp1_skeleton/tsc.o
 mp1_skeleton/tsd
 
 mp1_skeleton/tsd.o
+
+*.txt

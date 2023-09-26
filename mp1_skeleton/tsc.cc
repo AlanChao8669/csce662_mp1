@@ -173,7 +173,7 @@ IReply Client::processCommand(std::string& input)
       string username = input.substr(input.find_first_of(" ")+1, input.length());
       return UnFollow(username);
     }else if(cmd == "TIMELINE"){
-      
+      ire.comm_status = SUCCESS;
     }else{
       // invalid command
       ire.grpc_status = grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "invalid command");
@@ -279,8 +279,6 @@ IReply Client::Login() {
 }
 
 // Timeline Command
-void Client::Timeline(const std::string& username) {
-
     // ------------------------------------------------------------
     // In this function, you are supposed to get into timeline mode.
     // You may need to call a service method to communicate with
@@ -301,7 +299,36 @@ void Client::Timeline(const std::string& username) {
     /***
     YOUR CODE HERE
     ***/
+void Client::Timeline(const std::string& username) {
 
+  ClientContext context;
+  shared_ptr<ClientReaderWriter<Message, Message>> stream(stub_->Timeline(&context));
+
+  std::thread writer([username, stream](){
+    // fisrt time into timeline mode
+    Message message = MakeMessage(username, "First_time_timeline");
+    stream->Write(message);
+    while(1){
+      string input = getPostMessage();
+      message = MakeMessage(username, input);
+      stream->Write(message);
+    }
+    stream->WritesDone();
+  });
+
+  std::thread reader([username, stream](){
+    Message message;
+    while(stream->Read(&message)){
+      google::protobuf::Timestamp timestamp = message.timestamp();
+      time_t time = timestamp.seconds();
+      // cout<< "get new post:" << message.msg() << endl;
+      // displayPostMessage(message.username(), message.msg(), time);
+      displayPostMessage(message.username(), message.msg(), message.time_str());
+    }
+  });
+
+  writer.join(); // wait for writer thread to finish
+  reader.join();
 }
 
 

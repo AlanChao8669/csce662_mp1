@@ -48,6 +48,7 @@
 #define log(severity, msg) LOG(severity) << msg; google::FlushLogFiles(google::severity); 
 
 #include "sns.grpc.pb.h"
+#include "utils.h"
 
 
 using google::protobuf::Timestamp;
@@ -228,14 +229,83 @@ class SNSServiceImpl final : public SNSService::Service {
   Status Timeline(ServerContext* context, 
 		ServerReaderWriter<Message, Message>* stream) override {
 
-    /*********
-    YOUR CODE HERE
-    **********/
-    
+    Message msg;
+    string formatted_msg;
+
+    while(stream->Read(&msg)) {
+      cout <<"Receive post From["+msg.username()+"]: " <<msg.msg()<<endl;
+      int user_idx = findClientIdx(msg.username());
+      Client* user = &client_db[user_idx];
+
+      // first time into timeline mode?
+      if(msg.msg() == "First_time_timeline"){
+        user->stream = stream; // record user's stream
+
+        // get 20 newest posts from user's following.txt
+        string line;
+        vector<string> newest_twenty;
+        ifstream in(msg.username()+"_following.txt");
+        int count = 0;
+        cout<< "following file size: " << user->following_file_size << endl;
+        while(getline(in, line)){
+          if(user->following_file_size > 20){
+	          if(count <= user->following_file_size-20){
+              count++;
+	            continue;
+            }
+          }
+          newest_twenty.push_back(line);
+        }
+        cout<< "size: " << newest_twenty.size() << endl;
+
+        //Send the newest messages to the client
+        Message new_msg; 
+        for(int i = newest_twenty.size(); i>0; i--){
+          if(newest_twenty[i].empty()) continue;
+          cout<< "newest:" << newest_twenty[i]<< endl;
+          vector<string> post_data = splitString(newest_twenty[i], '|');
+          cout<< "time_str:" << post_data[0] << " , username:" << post_data[1] << ", msg:" << post_data[2] << endl;
+          new_msg.set_time_str(post_data[0]);
+          new_msg.set_username(post_data[1]);
+          new_msg.set_msg(post_data[2]);
+          stream->Write(new_msg);
+        }   
+        continue; // end of first timeline mode processing
+
+      }else{ // not the first time into timeline mode
+        // format the message before storing it.
+        string time = google::protobuf::util::TimeUtil::ToString(msg.timestamp());
+        msg.set_time_str(time);
+        formatted_msg = time+"|"+msg.username()+"|"+msg.msg()+"\n"; // user '|' as delimeter
+        cout<< formatted_msg;
+        // store user's post to user_timeline.txt
+        ofstream user_file(msg.username()+"_timeline.txt", ios::app|ios::out|ios::in);
+        user_file << formatted_msg;
+        user_file.close();
+      }
+
+      // get all followers of the current user
+      for(Client* follower : user->client_followers){
+        cout<< "write post from["+user->username+"] to ["+follower->username +"]"<< endl;
+        // write the message to the follower's stream(if connected and in chat mode)
+        if(follower->connected && follower->stream != 0){
+          cout<< "write to stream:" << follower->stream << endl;
+          follower->stream->Write(msg);
+        }
+        // write the message to the follower's following file
+        string fileName = follower->username + "_following.txt";
+        ofstream following_file(fileName, ios::app|ios::out|ios::in);
+        following_file << formatted_msg;
+        following_file.close();
+        follower->following_file_size++; // record current following file size
+      }
+
+    }
+
     return Status::OK;
   }
 
-};
+}; // end of class SNSServiceImpl
 
 void RunServer(std::string port_no) {
   std::string server_address = "0.0.0.0:"+port_no;
