@@ -7,6 +7,7 @@
 #include <csignal>
 #include <grpc++/grpc++.h>
 #include "client.h"
+#include "utils.h"
 
 #include "sns.grpc.pb.h"
 using grpc::Channel;
@@ -15,11 +16,13 @@ using grpc::ClientReader;
 using grpc::ClientReaderWriter;
 using grpc::ClientWriter;
 using grpc::Status;
+using grpc::StatusCode;
 using csce438::Message;
 using csce438::ListReply;
 using csce438::Request;
 using csce438::Reply;
 using csce438::SNSService;
+using namespace std;
 
 void sig_ignore(int sig) {
   std::cout << "Signal caught " + sig;
@@ -82,10 +85,32 @@ int Client::connectTo()
   // ------------------------------------------------------------
     
 ///////////////////////////////////////////////////////////
-// YOUR CODE HERE
-//////////////////////////////////////////////////////////
+  string target = hostname + ":" + port;
+  // Create a channel.
+  std::shared_ptr<Channel> channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+  // Create a client stub.
+  stub_ = SNSService::NewStub(channel,grpc::StubOptions());
+  cout << "Complete creating a client stub." << endl;
 
-    return 1;
+  // Login
+  ClientContext context;
+  Request request;
+  Reply reply;
+  request.set_username(username);
+  stub_->Login(&context, request, &reply);
+
+  if(reply.msg().empty()){
+    cout<< "Server reply empty." << endl;
+    return -1;
+  }else{
+    cout<< reply.msg() << endl;
+    if(reply.msg() == "invalid username(Already exists).") {
+      return -1;
+    }else{
+      return 1;
+    }
+  }
+
 }
 
 IReply Client::processCommand(std::string& input)
@@ -137,10 +162,23 @@ IReply Client::processCommand(std::string& input)
 
     IReply ire;
     
-    /*********
-    YOUR CODE HERE
-    **********/
-
+    string cmd = input.substr(0, input.find(" "));
+    cout<<"processCommand: "<< cmd << endl;
+    if(cmd == "LIST"){
+      return List();
+    }else if(cmd == "FOLLOW"){
+      string username = input.substr(input.find_first_of(" ")+1, input.length());
+      return Follow(username);
+    }else if(cmd == "UNFOLLOW"){
+      string username = input.substr(input.find_first_of(" ")+1, input.length());
+      return UnFollow(username);
+    }else if(cmd == "TIMELINE"){
+      ire.comm_status = SUCCESS;
+    }else{
+      // invalid command
+      ire.grpc_status = grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "invalid command");
+    }
+    
     return ire;
 }
 
@@ -153,54 +191,94 @@ void Client::processTimeline()
 // List Command
 IReply Client::List() {
 
-    IReply ire;
+  IReply ire;
 
-    /*********
-    YOUR CODE HERE
-    **********/
+  ClientContext context;
+  Request request;
+  request.set_username(username);
+  ListReply listReply;
 
-    return ire;
+  // using stub to call server List() method
+  Status status = stub_->List(&context, request, &listReply);
+  ire.grpc_status = status;
+  if(status.ok()){
+    // set iReply.all_users, followers
+    for(string s: listReply.all_users()){
+      ire.all_users.push_back(s);
+    }
+    for(string s: listReply.followers()){
+      ire.followers.push_back(s);
+    }
+    ire.comm_status = SUCCESS;
+  }
+
+  return ire;
 }
 
 // Follow Command        
-IReply Client::Follow(const std::string& username2) {
+IReply Client::Follow(const std::string& follow_username) {
 
-    IReply ire; 
-      
-    /***
-    YOUR CODE HERE
-    ***/
+  IReply ire;
 
-    return ire;
+  // prepare request
+  ClientContext context;
+  Request request;
+  request.set_username(username);
+  request.add_arguments(follow_username);
+  Reply reply;
+  // using stub to call server Follow() method
+  Status status = stub_->Follow(&context, request, &reply);
+  ire.grpc_status = status;
+  if(status.ok()){
+    ire.comm_status = SUCCESS;
+    cout<< "You are now following " << follow_username << endl;
+  }
+
+  return ire;
 }
 
 // UNFollow Command  
-IReply Client::UnFollow(const std::string& username2) {
+IReply Client::UnFollow(const std::string& unfollow_user) {
 
-    IReply ire;
+  IReply ire;
 
-    /***
-    YOUR CODE HERE
-    ***/
+  // prepare request
+  ClientContext context;
+  Request request;
+  request.set_username(username);
+  request.add_arguments(unfollow_user);
+  Reply reply;
+  // using stub to call server Follow() method
+  Status status = stub_->UnFollow(&context, request, &reply);
+  ire.grpc_status = status;
+  if(status.ok()){
+    ire.comm_status = SUCCESS;
+    cout<< "You have unfollowed " << unfollow_user << endl;
+  }
 
-    return ire;
+  return ire;
 }
 
 // Login Command  
 IReply Client::Login() {
 
     IReply ire;
-  
-    /***
-     YOUR CODE HERE
-    ***/
+
+    // Clientcontext context;
+    // Request request;
+    // Reply reply;
+
+    // Status status = stub_->Login(&context, request, &reply); // use stub to call server-side Login method.
+    // if (reply.msg() == "you have already joined") {
+    //     Connection failed;
+    // } else {
+    //     Connection succeeded;
+    // }
 
     return ire;
 }
 
 // Timeline Command
-void Client::Timeline(const std::string& username) {
-
     // ------------------------------------------------------------
     // In this function, you are supposed to get into timeline mode.
     // You may need to call a service method to communicate with
@@ -221,7 +299,36 @@ void Client::Timeline(const std::string& username) {
     /***
     YOUR CODE HERE
     ***/
+void Client::Timeline(const std::string& username) {
 
+  ClientContext context;
+  shared_ptr<ClientReaderWriter<Message, Message>> stream(stub_->Timeline(&context));
+
+  std::thread writer([username, stream](){
+    // fisrt time into timeline mode
+    Message message = MakeMessage(username, "First_time_timeline");
+    stream->Write(message);
+    while(1){
+      string input = getPostMessage();
+      message = MakeMessage(username, input);
+      stream->Write(message);
+    }
+    stream->WritesDone();
+  });
+
+  std::thread reader([username, stream](){
+    Message message;
+    while(stream->Read(&message)){
+      google::protobuf::Timestamp timestamp = message.timestamp();
+      time_t time = timestamp.seconds();
+      // cout<< "get new post:" << message.msg() << endl;
+      // displayPostMessage(message.username(), message.msg(), time);
+      displayPostMessage(message.username(), message.msg(), message.time_str());
+    }
+  });
+
+  writer.join(); // wait for writer thread to finish
+  reader.join();
 }
 
 

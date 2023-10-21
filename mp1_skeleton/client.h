@@ -49,7 +49,8 @@ struct IReply
 
 
 std::string getPostMessage();
-void displayPostMessage(const std::string& sender, const std::string& message, std::time_t& time);
+// void displayPostMessage(const std::string& sender, const std::string& message, std::time_t& time);
+void displayPostMessage(const std::string& sender, const std::string& message, const std::string& time);
   
 class IClient
 {
