@@ -24,3 +24,5 @@ mp1_skeleton/tsd.o
 *.txt
 
 mp1/MP1_solution_code/
+
+.vscode/settings.json

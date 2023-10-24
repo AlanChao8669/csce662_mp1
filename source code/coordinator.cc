@@ -33,8 +33,9 @@ using csce438::CoordService;
 using csce438::ServerInfo;
 using csce438::Confirmation;
 using csce438::ID;
-using csce438::ServerList;
-using csce438::SynchService;
+// using csce438::ServerList;
+// using csce438::SynchService;
+using namespace std;
 
 struct zNode{
     int serverID;
@@ -52,32 +53,96 @@ std::mutex v_mutex;
 std::vector<zNode> cluster1;
 std::vector<zNode> cluster2;
 std::vector<zNode> cluster3;
+// vector<vector<zNode>> cluster_db;
+// cluster_db.push_back(cluster1);
+// cluster_db.push_back(cluster2);
+// cluster_db.push_back(cluster3);
 
 
 //func declarations
-int findServer(std::vector<zNode> v, int id);
+int findServerIdx(std::vector<zNode> v, int id);
 std::time_t getTimeNow();
 void checkHeartbeat();
 
 
-bool ServerStruct::isActive(){
-    bool status = false;
-    if(!missed_heartbeat){
-        status = true;
-    }else if(difftime(getTimeNow(),last_heartbeat) < 10){
-        status = true;
-    }
-    return status;
-}
+// bool ServerStruct::isActive(){
+//     bool status = false;
+//     if(!missed_heartbeat){
+//         status = true;
+//     }else if(difftime(getTimeNow(),last_heartbeat) < 10){
+//         status = true;
+//     }
+//     return status;
+// }
 
 class CoordServiceImpl final : public CoordService::Service {
 
   
   Status Heartbeat(ServerContext* context, const ServerInfo* serverinfo, Confirmation* confirmation) override {
-    //std::cout<<"Got Heartbeat! "<<serverinfo->type()<<"("<<serverinfo->serverid()<<")"<<std::endl;
-
-    // Your code here
     
+    // get server info
+    int clusterId = serverinfo->clusterid();
+    int serverId = serverinfo->serverid();
+    string type = serverinfo->type();
+
+    cout<<"Got Heartbeat! Type:"<<type<<"(clusterID:"<< clusterId<<",serverID:"<<serverId<<")"<<endl;
+
+    // check if the server is already exist?
+    if("Register" == type){  // first heartbeat after server start.
+      cout<< "Register for the new server..."<< endl;
+      string serverIP = serverinfo->hostname();
+      string serverPort = serverinfo->port();
+      zNode new_server;
+      new_server.serverID = serverId;
+      new_server.hostname = serverIP;
+      new_server.port = serverPort;
+      new_server.type = "";
+      new_server.last_heartbeat = getTimeNow();
+      cout<< "=>server timestamp(Register): "<< new_server.last_heartbeat<< endl;
+      new_server.missed_heartbeat = false;
+
+      // add server to the cluster
+      // cluster_db[clusterId].push_back(new_server); // TODO
+      switch (clusterId)
+      {
+      case 1:
+        cluster1.push_back(new_server);
+        break;
+      case 2:
+        cluster2.push_back(new_server);
+        break;
+      case 3:
+        cluster3.push_back(new_server);
+        break;
+      default:
+        break;
+      }
+
+    }else if("Active" == type){
+      // vector<zNode> cluster = cluster_db[clusterId]; //TODO
+      // update server zNode's timestamp
+      cout<< "Find the server and update timestamp..."<< endl;
+      zNode server;
+      switch (clusterId)
+      {
+      case 1:
+        server = cluster1[findServerIdx(cluster1, serverId)];
+        server.last_heartbeat = getTimeNow();
+        break;
+      case 2:
+        server = cluster2[findServerIdx(cluster2, serverId)];
+        server.last_heartbeat = getTimeNow();
+        break;
+      case 3:
+        server = cluster3[findServerIdx(cluster3, serverId)];
+        server.last_heartbeat = getTimeNow();
+        break;
+      default:
+        break;
+      }
+      cout<< "=>server timestamp(Update): "<< server.last_heartbeat<< endl;
+    }
+
     return Status::OK;
   }
   
@@ -97,6 +162,7 @@ class CoordServiceImpl final : public CoordService::Service {
 
 };
 
+// check all servers' heartbeat
 void RunServer(std::string port_no){
   //start thread to check heartbeats
   std::thread hb(checkHeartbeat);
@@ -145,14 +211,14 @@ void checkHeartbeat(){
       //if true turn missed heartbeat = true
       // Your code below
       for(auto& s : "SERVERS"){
-	if(difftime(getTimeNow(),s.last_heartbeat)>10){
-	  if(!s.missed_heartbeat){
-	    s.missed_heartbeat = true;
-	    s.last_heartbeat = getTimeNow();
-	  }else{
+	// if(difftime(getTimeNow(),s.last_heartbeat)>10){
+	//   if(!s.missed_heartbeat){
+	//     s.missed_heartbeat = true;
+	//     s.last_heartbeat = getTimeNow();
+	//   }else{
 	    
-	  }
-	}
+	//   }
+	// }
       }
       
       sleep(3);
@@ -164,3 +230,14 @@ std::time_t getTimeNow(){
     return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 }
 
+// find the server by clusterId + serverId
+int findServerIdx(std::vector<zNode> clusterVector, int id){
+  for(int i=0; i<clusterVector.size(); i++){
+    if(clusterVector[i].serverID == id){
+      cout<< "find the server in Idx: " << i << endl;
+      return i;
+    }
+  }
+  // server not found
+  return -1;
+}
