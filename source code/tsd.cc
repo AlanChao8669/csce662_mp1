@@ -39,6 +39,7 @@
 #include <thread>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <stdlib.h>
@@ -90,6 +91,11 @@ struct Client {
 //Vector that stores every client that has been created
 std::vector<Client> client_db;
 
+// Have an instance of the coordinator stub as a member variable.
+std::unique_ptr<CoordService::Stub> stub_;
+
+string server_directroy_path;
+
 // find the index of the user in the client db by username
 int findClientIdx(string username){
     for(int i=0; i<client_db.size(); i++){
@@ -101,8 +107,6 @@ int findClientIdx(string username){
     return -1;
 }
 
-// Have an instance of the coordinator stub as a member variable.
-std::unique_ptr<CoordService::Stub> stub_;
 
 class SNSServiceImpl final : public SNSService::Service {
   
@@ -290,7 +294,8 @@ class SNSServiceImpl final : public SNSService::Service {
         formatted_msg = time+"|"+msg.username()+"|"+msg.msg()+"\n"; // user '|' as delimeter
         cout<< formatted_msg;
         // store user's post to user_timeline.txt
-        ofstream user_file(msg.username()+"_timeline.txt", ios::app|ios::out|ios::in);
+        string user_timeline = server_directroy_path + "/" + msg.username()+"_timeline.txt";
+        ofstream user_file(user_timeline, ios::app|ios::out|ios::in);
         user_file << formatted_msg;
         user_file.close();
       }
@@ -325,7 +330,7 @@ void Heartbeat(string coordinatorAddr, string clusterId, string serverId){
   std::shared_ptr<Channel> channel = grpc::CreateChannel(coordinatorAddr, grpc::InsecureChannelCredentials());
   // Create a coordinator stub.
   stub_ = CoordService::NewStub(channel,grpc::StubOptions());
-  cout << "Complete creating a coordinator stub." << endl;
+  //cout << "Complete creating a coordinator stub." << endl;
 
   while(true){
     // preapre heartbeat message
@@ -343,6 +348,17 @@ void Heartbeat(string coordinatorAddr, string clusterId, string serverId){
 
     //this_thread::sleep_for(chrono::seconds(5));
     sleep(5);
+  }
+}
+
+
+void createFolder(string foldername) {
+  std::filesystem::path folderpath(foldername);
+
+  // Check if the folder exists.
+  if (!std::filesystem::exists(folderpath)) {
+    // Create the folder if it does not exist.
+    std::filesystem::create_directories(folderpath);
   }
 }
 
@@ -382,6 +398,10 @@ void RunServer(string clusterId, string serverId, string coordinatorIP, string c
 
   // create a new thread to send heartbeat periodically
   thread thread(Heartbeat, coordinatorAddr, clusterId, serverId);
+
+  // create its own directory
+  server_directroy_path = "server_" + clusterId + "_" + serverId;
+  createFolder(server_directroy_path);
 
   server->Wait();
 }// end RunServer()
