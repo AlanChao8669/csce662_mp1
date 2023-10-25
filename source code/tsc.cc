@@ -8,7 +8,7 @@
 #include <grpc++/grpc++.h>
 #include "client.h"
 #include "utils.h"
-
+#include "coordinator.grpc.pb.h" // mp2.1
 #include "sns.grpc.pb.h"
 using grpc::Channel;
 using grpc::ClientContext;
@@ -22,6 +22,9 @@ using csce438::ListReply;
 using csce438::Request;
 using csce438::Reply;
 using csce438::SNSService;
+using csce438::CoordService;
+using csce438::ServerInfo;
+using csce438::ID;
 using namespace std;
 
 void sig_ignore(int sig) {
@@ -62,6 +65,7 @@ private:
   // You can have an instance of the client stub
   // as a member variable.
   std::unique_ptr<SNSService::Stub> stub_;
+  std::unique_ptr<CoordService::Stub> coord_stub_;
   
   IReply Login();
   IReply List();
@@ -85,29 +89,49 @@ int Client::connectTo()
   // ------------------------------------------------------------
     
 ///////////////////////////////////////////////////////////
-  string target = hostname + ":" + port;
+  string coordinatorAddr = hostname + ":" + port;
   // Create a channel.
-  std::shared_ptr<Channel> channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
-  // Create a client stub.
-  stub_ = SNSService::NewStub(channel,grpc::StubOptions());
-  cout << "Complete creating a client stub." << endl;
+  std::shared_ptr<Channel> channel = grpc::CreateChannel(coordinatorAddr, grpc::InsecureChannelCredentials());
+  coord_stub_ = CoordService::NewStub(channel,grpc::StubOptions());
+  cout << "Complete creating a coordinator stub." << endl;
 
-  // Login
   ClientContext context;
-  Request request;
-  Reply reply;
-  request.set_username(username);
-  stub_->Login(&context, request, &reply);
+  ServerInfo serverInfo;
+  ID id;
+  id.set_id(stoi(username));
 
-  if(reply.msg().empty()){
-    cout<< "Server reply empty." << endl;
+  Status status = coord_stub_->GetServer(&context, id, &serverInfo);
+  if(!status.ok()){ // fail to get server info
+    cout<< "Fail to get server info from coordinator." << endl;
     return -1;
-  }else{
-    cout<< reply.msg() << endl;
-    if(reply.msg() == "invalid username(Already exists).") {
+  }else{ 
+    // get server info successfully
+    string serverIP = serverInfo.hostname();
+    string serverPort = serverInfo.port();
+    string serverAddr = serverIP + ":" +serverPort;
+    cout<< "Got server info from the coordinator: "<< serverAddr<< endl;
+    std::shared_ptr<Channel> channel2 = grpc::CreateChannel(serverAddr, grpc::InsecureChannelCredentials());
+    // Create a client stub.
+    stub_ = SNSService::NewStub(channel2,grpc::StubOptions());
+    cout << "Complete creating a client stub." << endl;
+
+    // Login
+    ClientContext context2;
+    Request request;
+    Reply reply;
+    request.set_username(username);
+    stub_->Login(&context2, request, &reply);
+
+    if(reply.msg().empty()){
+      cout<< "Server reply empty." << endl;
       return -1;
     }else{
-      return 1;
+      cout<< reply.msg() << endl;
+      if(reply.msg() == "invalid username(Already exists).") {
+        return -1;
+      }else{
+        return 1;
+      }
     }
   }
 
@@ -302,12 +326,17 @@ IReply Client::Login() {
 void Client::Timeline(const std::string& username) {
 
   ClientContext context;
+
   shared_ptr<ClientReaderWriter<Message, Message>> stream(stub_->Timeline(&context));
 
   std::thread writer([username, stream](){
     // fisrt time into timeline mode
     Message message = MakeMessage(username, "First_time_timeline");
-    stream->Write(message);
+    bool suc = stream->Write(message);
+    if(!suc){
+      cout<< "Connection Failed." << endl;
+      return;
+    }
     while(1){
       string input = getPostMessage();
       message = MakeMessage(username, input);
@@ -343,20 +372,20 @@ int main(int argc, char** argv) {
   std::string port = "3010";
     
   int opt = 0;
-  while ((opt = getopt(argc, argv, "h:u:p:")) != -1){
+  while ((opt = getopt(argc, argv, "h:u:k:")) != -1){
     switch(opt) {
     case 'h':
       hostname = optarg;break;
     case 'u':
       username = optarg;break;
-    case 'p':
+    case 'k':
       port = optarg;break;
     default:
       std::cout << "Invalid Command Line Argument\n";
     }
   }
       
-  std::cout << "Logging Initialized. Client starting...";
+  std::cout << "Logging Initialized. Client starting..."<< endl;
   
   Client myc(hostname, username, port);
   
