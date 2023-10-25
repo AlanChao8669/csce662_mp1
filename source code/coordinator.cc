@@ -88,60 +88,143 @@ class CoordServiceImpl final : public CoordService::Service {
     cout<<"Got Heartbeat! Type:"<<type<<"(clusterID:"<< clusterId<<",serverID:"<<serverId<<")"<<endl;
 
     // check if the server is already exist?
-    if("Register" == type){  // first heartbeat after server start.
-      cout<< "Register for the new server..."<< endl;
-      string serverIP = serverinfo->hostname();
-      string serverPort = serverinfo->port();
-      zNode new_server;
-      new_server.serverID = serverId;
-      new_server.hostname = serverIP;
-      new_server.port = serverPort;
-      new_server.type = "";
-      new_server.last_heartbeat = getTimeNow();
-      cout<< "=>server timestamp(Register): "<< new_server.last_heartbeat<< endl;
-      new_server.missed_heartbeat = false;
-
-      // add server to the cluster
-      // cluster_db[clusterId].push_back(new_server); // TODO
-      switch (clusterId)
-      {
+    int serverIdx =  -1;
+    switch (clusterId){
       case 1:
-        cluster1.push_back(new_server);
+        // check if already exist.
+        serverIdx = findServerIdx(cluster1, serverId); // server's index in the cluster vector
+        if(serverIdx != -1){ // exist
+          cout<< "Found server. Updating heartbeat..." << endl;
+          zNode* server = &cluster1[serverIdx];
+          server->last_heartbeat = getTimeNow(); // update heartbeat
+          server->missed_heartbeat = false;
+          cout<< "=>server timestamp(Update): "<< server->last_heartbeat<< endl;
+        }else{ // not found
+          // register the server
+          cout<< "Register for the new server..."<< endl;
+          string serverIP = serverinfo->hostname();
+          string serverPort = serverinfo->port();
+          zNode new_server;
+          new_server.serverID = serverId;
+          new_server.hostname = serverIP;
+          new_server.port = serverPort;
+          new_server.type = "";
+          new_server.last_heartbeat = getTimeNow();
+          cout<< "=>server timestamp(Register): "<< new_server.last_heartbeat<< endl;
+          new_server.missed_heartbeat = false;
+          cluster1.push_back(new_server);
+        }
         break;
       case 2:
-        cluster2.push_back(new_server);
+        serverIdx = findServerIdx(cluster2, serverId); // server's index in the cluster vector
+        if(serverIdx != -1){ // exist
+          cout<< "Found server. Updating heartbeat..."<< endl;
+          zNode* server = &cluster2[serverIdx];
+          server->last_heartbeat = getTimeNow(); // update heartbeat
+          server->missed_heartbeat = false;
+          cout<< "=>server timestamp(Update): "<< server->last_heartbeat<< endl;
+        }else{ // not found
+          // register the server
+          cout<< "Register for the new server..."<< endl;
+          string serverIP = serverinfo->hostname();
+          string serverPort = serverinfo->port();
+          zNode new_server;
+          new_server.serverID = serverId;
+          new_server.hostname = serverIP;
+          new_server.port = serverPort;
+          new_server.type = "";
+          new_server.last_heartbeat = getTimeNow();
+          cout<< "=>server timestamp(Register): "<< new_server.last_heartbeat<< endl;
+          new_server.missed_heartbeat = false;
+          cluster2.push_back(new_server);
+        }
         break;
       case 3:
-        cluster3.push_back(new_server);
+        serverIdx = findServerIdx(cluster3, serverId); // server's index in the cluster vector
+        if(serverIdx != -1){ // exist
+          cout<< "Found server. Updating heartbeat..."<< endl;
+          zNode* server = &cluster3[serverIdx];
+          server->last_heartbeat = getTimeNow(); // update heartbeat
+          server->missed_heartbeat = false;
+          cout<< "=>server timestamp(Update): "<< server->last_heartbeat<< endl;
+        }else{ // not found
+          // register the server
+          cout<< "Register for the new server..."<< endl;
+          string serverIP = serverinfo->hostname();
+          string serverPort = serverinfo->port();
+          zNode new_server;
+          new_server.serverID = serverId;
+          new_server.hostname = serverIP;
+          new_server.port = serverPort;
+          new_server.type = "";
+          new_server.last_heartbeat = getTimeNow();
+          cout<< "=>server timestamp(Register): "<< new_server.last_heartbeat<< endl;
+          new_server.missed_heartbeat = false;
+          cluster3.push_back(new_server);
+        }
         break;
       default:
         break;
       }
 
-    }else if("Active" == type){
-      // vector<zNode> cluster = cluster_db[clusterId]; //TODO
-      // update server zNode's timestamp
-      cout<< "Find the server and update timestamp..."<< endl;
-      zNode server;
-      switch (clusterId)
-      {
-      case 1:
-        server = cluster1[findServerIdx(cluster1, serverId)];
-        server.last_heartbeat = getTimeNow();
-        break;
-      case 2:
-        server = cluster2[findServerIdx(cluster2, serverId)];
-        server.last_heartbeat = getTimeNow();
-        break;
-      case 3:
-        server = cluster3[findServerIdx(cluster3, serverId)];
-        server.last_heartbeat = getTimeNow();
-        break;
-      default:
-        break;
-      }
-      cout<< "=>server timestamp(Update): "<< server.last_heartbeat<< endl;
-    }
+
+    // if("Register" == type){  // first heartbeat after server start.
+    //   cout<< "Register for the new server..."<< endl;
+    //   string serverIP = serverinfo->hostname();
+    //   string serverPort = serverinfo->port();
+    //   zNode new_server;
+    //   new_server.serverID = serverId;
+    //   new_server.hostname = serverIP;
+    //   new_server.port = serverPort;
+    //   new_server.type = "";
+    //   new_server.last_heartbeat = getTimeNow();
+    //   cout<< "=>server timestamp(Register): "<< new_server.last_heartbeat<< endl;
+    //   new_server.missed_heartbeat = false;
+
+    //   // add server to the cluster
+    //   // cluster_db[clusterId].push_back(new_server); // TODO
+    //   switch (clusterId)
+    //   {
+    //   case 1:
+    //     cluster1.push_back(new_server);
+    //     break;
+    //   case 2:
+    //     cluster2.push_back(new_server);
+    //     break;
+    //   case 3:
+    //     cluster3.push_back(new_server);
+    //     break;
+    //   default:
+    //     break;
+    //   }
+
+    // }else if("Active" == type){
+    //   // vector<zNode> cluster = cluster_db[clusterId]; //TODO
+    //   // update server zNode's timestamp
+    //   cout<< "Find the server and update timestamp..."<< endl;
+    //   zNode* server;
+    //   switch (clusterId)
+    //   {
+    //   case 1:
+    //     server = &cluster1[findServerIdx(cluster1, serverId)];
+    //     server->last_heartbeat = getTimeNow();
+    //     server->missed_heartbeat = false;
+    //     break;
+    //   // case 2:
+    //   //   server = cluster2[findServerIdx(cluster2, serverId)];
+    //   //   server.last_heartbeat = getTimeNow();
+    //   //   server.missed_heartbeat = false;
+    //   //   break;
+    //   // case 3:
+    //   //   server = cluster3[findServerIdx(cluster3, serverId)];
+    //   //   server.last_heartbeat = getTimeNow();
+    //   //   server.missed_heartbeat = false;
+    //   //   break;
+    //   default:
+    //     break;
+    //   }
+    //   cout<< "=>server timestamp(Update): "<< server->last_heartbeat<< endl;
+    // }
 
     return Status::OK;
   }
@@ -150,8 +233,36 @@ class CoordServiceImpl final : public CoordService::Service {
   //this function assumes there are always 3 clusters and has math
   //hardcoded to represent this.
   Status GetServer(ServerContext* context, const ID* id, ServerInfo* serverinfo) override {
-    std::cout<<"Got GetServer for clientID: "<<id->id()<<std::endl;
-    int serverID = (id->id()%3)+1;
+    int userId = id->id();
+    int clusterId = ((userId-1)%3)+1;
+    int serverId = clusterId; // in mp2.1, one cluster only has one server.
+    cout<<"Get Server for clientID: "<<userId<< "(clusterID: "<< clusterId <<endl;
+    
+    // find the server by clusterID + serverID
+    zNode server;
+    switch (clusterId){
+      case 1:
+        server = cluster1[findServerIdx(cluster1, serverId)];
+        break;
+      case 2:
+        server = cluster2[findServerIdx(cluster2, serverId)];
+        break;
+      case 3:
+        server = cluster3[findServerIdx(cluster3, serverId)];
+        break;
+      default:
+        break;
+    }
+
+    // check whether the server is available (by miss_heartbeat)
+    if(server.missed_heartbeat){
+      string errMsg = "Error: Server is missing heartbeat.";
+      return Status(grpc::StatusCode::UNAVAILABLE, errMsg);
+    }else{
+      serverinfo->set_hostname(server.hostname);
+      serverinfo->set_port(server.port);
+
+    }
 
     // Your code here
     // If server is active, return serverinfo
@@ -210,15 +321,46 @@ void checkHeartbeat(){
       //check servers for heartbeat > 10
       //if true turn missed heartbeat = true
       // Your code below
-      for(auto& s : "SERVERS"){
-	// if(difftime(getTimeNow(),s.last_heartbeat)>10){
-	//   if(!s.missed_heartbeat){
-	//     s.missed_heartbeat = true;
-	//     s.last_heartbeat = getTimeNow();
-	//   }else{
-	    
-	//   }
-	// }
+      time_t now_time = getTimeNow();
+      cout<< "Start checking heartbeat. Now Time: " << now_time << endl;
+      for(auto& s : cluster1){
+        if(difftime(now_time,s.last_heartbeat)>10){
+          cout<< "C1: Haven't received heartbeat for over 10 sec!"<< endl; 
+          cout<< "(ServerId: "<< s.serverID<< ",last_heartbeat: "<< s.last_heartbeat<< ")" << endl;
+          if(!s.missed_heartbeat){
+            s.missed_heartbeat = true;
+            s.last_heartbeat = now_time;
+          }else{
+            // already miss heartbeat in last check => remove from routing table?
+            s.last_heartbeat = now_time;
+          }
+        }
+      }
+      for(auto& s : cluster2){
+        if(difftime(now_time,s.last_heartbeat)>10){
+          cout<< "C2: Haven't received heartbeat for over 10 sec!"<< endl; 
+          cout<< "(ServerId: "<< s.serverID<< ",last_heartbeat: "<< s.last_heartbeat<< ")" << endl;
+          if(!s.missed_heartbeat){
+            s.missed_heartbeat = true;
+            s.last_heartbeat = now_time;
+          }else{
+            // already miss heartbeat in last check => remove from routing table?
+            s.last_heartbeat = now_time;
+          }
+        }
+      }
+      for(auto& s : cluster3){
+        if(difftime(now_time,s.last_heartbeat)>10){
+          cout<< "C3: Haven't received heartbeat for over 10 sec!"<< endl; 
+          cout<< "(ServerId: "<< s.serverID<< ",last_heartbeat: "<< s.last_heartbeat<< ")" << endl;
+          if(!s.missed_heartbeat){
+            s.missed_heartbeat = true;
+            s.last_heartbeat = now_time;
+          }else{
+            // already miss heartbeat in last check => remove from routing table?
+            s.last_heartbeat = now_time;
+          }
+        }
       }
       
       sleep(3);
