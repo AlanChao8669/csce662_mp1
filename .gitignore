@@ -22,3 +22,33 @@ mp1_skeleton/tsd
 mp1_skeleton/tsd.o
 
 *.txt
+
+mp1/MP1_solution_code/
+
+.vscode/settings.json
+
+source code/tsc
+
+*.o
+
+source code/coordinator
+
+source code/coordinator.grpc.pb.cc
+
+source code/coordinator.grpc.pb.h
+
+source code/coordinator.pb.cc
+
+source code/coordinator.pb.h
+
+source code/sns.grpc.pb.cc
+
+source code/sns.grpc.pb.h
+
+source code/sns.pb.cc
+
+source code/sns.pb.h
+
+source code/tsd
+
+source code.zip

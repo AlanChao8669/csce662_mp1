@@ -36,8 +36,10 @@
 #include <google/protobuf/timestamp.pb.h>
 #include <google/protobuf/duration.pb.h>
 
+#include <thread>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <stdlib.h>
@@ -50,6 +52,7 @@
 #include "sns.grpc.pb.h"
 #include "utils.h"
 
+#include "coordinator.grpc.pb.h" // mp2.1
 
 using google::protobuf::Timestamp;
 using google::protobuf::Duration;
@@ -65,6 +68,12 @@ using csce438::ListReply;
 using csce438::Request;
 using csce438::Reply;
 using csce438::SNSService;
+using csce438::CoordService;
+using csce438::ServerInfo;
+using csce438::Confirmation;
+using csce438::ID;
+using grpc::Channel;
+using grpc::ClientContext;
 using namespace std;
 
 struct Client {
@@ -82,6 +91,11 @@ struct Client {
 //Vector that stores every client that has been created
 std::vector<Client> client_db;
 
+// Have an instance of the coordinator stub as a member variable.
+std::unique_ptr<CoordService::Stub> stub_;
+
+string server_directroy_path;
+
 // find the index of the user in the client db by username
 int findClientIdx(string username){
     for(int i=0; i<client_db.size(); i++){
@@ -92,6 +106,7 @@ int findClientIdx(string username){
     // user not found
     return -1;
 }
+
 
 class SNSServiceImpl final : public SNSService::Service {
   
@@ -279,7 +294,8 @@ class SNSServiceImpl final : public SNSService::Service {
         formatted_msg = time+"|"+msg.username()+"|"+msg.msg()+"\n"; // user '|' as delimeter
         cout<< formatted_msg;
         // store user's post to user_timeline.txt
-        ofstream user_file(msg.username()+"_timeline.txt", ios::app|ios::out|ios::in);
+        string user_timeline = server_directroy_path + "/" + msg.username()+"_timeline.txt";
+        ofstream user_file(user_timeline, ios::app|ios::out|ios::in);
         user_file << formatted_msg;
         user_file.close();
       }
@@ -307,9 +323,52 @@ class SNSServiceImpl final : public SNSService::Service {
 
 }; // end of class SNSServiceImpl
 
-void RunServer(std::string port_no) {
-  std::string server_address = "0.0.0.0:"+port_no;
+// send the message to the coordinator every 5 sec.
+void Heartbeat(string coordinatorAddr, string clusterId, string serverId){
+
+  // Create a channel.
+  std::shared_ptr<Channel> channel = grpc::CreateChannel(coordinatorAddr, grpc::InsecureChannelCredentials());
+  // Create a coordinator stub.
+  stub_ = CoordService::NewStub(channel,grpc::StubOptions());
+  //cout << "Complete creating a coordinator stub." << endl;
+
+  while(true){
+    // preapre heartbeat message
+    ClientContext context;
+    ServerInfo serverInfo;
+    serverInfo.set_clusterid(stoi(clusterId));
+    serverInfo.set_serverid(stoi(serverId));
+    serverInfo.set_type("Active");
+    Confirmation confirmation;
+    // send heartbeat to the coordinator
+    // cout<< coordinatorAddr<< "|| "<<clusterId<< "|| "<<serverId<< endl;
+    // cout<< "stub:" << &stub_ <<" context:" << &context << " serverinfo:"<< &serverInfo << endl;
+    stub_->Heartbeat(&context, serverInfo, &confirmation);
+    cout<< "Sent a heartbeat to the coordinator ("<< coordinatorAddr<< ")"<< endl;
+
+    //this_thread::sleep_for(chrono::seconds(5));
+    sleep(5);
+  }
+}
+
+
+void createFolder(string foldername) {
+  std::filesystem::path folderpath(foldername);
+
+  // Check if the folder exists.
+  if (!std::filesystem::exists(folderpath)) {
+    // Create the folder if it does not exist.
+    std::filesystem::create_directories(folderpath);
+  }
+}
+
+void RunServer(string clusterId, string serverId, string coordinatorIP, string coordinatorPort, std::string port_no) {
+  string serverIP = "0.0.0.0";
+  std::string server_address = serverIP + ":" + port_no;
   SNSServiceImpl service;
+
+  cout<< "Server start running. "<< endl<< "ClusterID: " << clusterId << ", ServerId: "<< serverId
+    << ", CoordinatorIP: "<< coordinatorIP<< ", CoordinatorPort:" << coordinatorPort << endl;
 
   ServerBuilder builder;
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -318,18 +377,56 @@ void RunServer(std::string port_no) {
   std::cout << "Server listening on " << server_address << std::endl;
   log(INFO, "Server listening on "+server_address);
 
+  // when server start, it connect to the coordinator and start sending Heartbeat messages
+  string coordinatorAddr = coordinatorIP + ":" + coordinatorPort;
+  // Create a channel.
+  std::shared_ptr<Channel> channel = grpc::CreateChannel(coordinatorAddr, grpc::InsecureChannelCredentials());
+  // Create a coordinator stub.
+  stub_ = CoordService::NewStub(channel,grpc::StubOptions());
+
+  // send Register message
+  ClientContext context;
+  ServerInfo serverInfo;
+  serverInfo.set_clusterid(stoi(clusterId));
+  serverInfo.set_serverid(stoi(serverId));
+  serverInfo.set_hostname(serverIP);
+  serverInfo.set_port(port_no);
+  serverInfo.set_type("Register");
+  Confirmation confirmation;
+  // Status Heartbeat(ServerContext* context, const ServerInfo* serverinfo, Confirmation* confirmation) override {
+  stub_->Heartbeat(&context, serverInfo, &confirmation);
+
+  // create a new thread to send heartbeat periodically
+  thread thread(Heartbeat, coordinatorAddr, clusterId, serverId);
+
+  // create its own directory
+  server_directroy_path = "server_" + clusterId + "_" + serverId;
+  createFolder(server_directroy_path);
+
   server->Wait();
-}
+}// end RunServer()
 
 int main(int argc, char** argv) {
 
-  std::string port = "3010";
+  string clusterId;
+  string serverId;
+  string coordinatorIP = "localhost";
+  string coordinatorPort = "9090";
+  string port = "3010";
   
   int opt = 0;
-  while ((opt = getopt(argc, argv, "p:")) != -1){
+  while ((opt = getopt(argc, argv, "c:s:h:k:p:")) != -1){
     switch(opt) {
+      case 'c':
+        clusterId = optarg;break;
+      case 's':
+        serverId = optarg;break;
+      case 'h':
+        coordinatorIP = optarg;break;
+      case 'k':
+        coordinatorPort = optarg;break;
       case 'p':
-          port = optarg;break;
+        port = optarg;break;
       default:
 	  std::cerr << "Invalid Command Line Argument\n";
     }
@@ -338,7 +435,7 @@ int main(int argc, char** argv) {
   std::string log_file_name = std::string("server-") + port;
   google::InitGoogleLogging(log_file_name.c_str());
   log(INFO, "Logging Initialized. Server starting...");
-  RunServer(port);
+  RunServer(clusterId, serverId, coordinatorIP, coordinatorPort, port);
 
   return 0;
 }
