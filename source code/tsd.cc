@@ -92,9 +92,14 @@ struct Client {
 std::vector<Client> client_db;
 
 // Have an instance of the coordinator stub as a member variable.
-std::unique_ptr<CoordService::Stub> stub_;
+std::unique_ptr<CoordService::Stub> coord_stub_;
 
 string server_directroy_path;
+// Master-Slave stuff
+bool isMaster;
+std::unique_ptr<SNSService::Stub> slave_stub_; // master use this to pass request to slave
+int clusterID;
+int serverID;
 
 // find the index of the user in the client db by username
 int findClientIdx(string username){
@@ -238,6 +243,38 @@ class SNSServiceImpl final : public SNSService::Service {
     }
     cout<< username + " " + reply_msg << endl;
 
+    if(isMaster){ // Master server should pass the request to Slave server
+      // ask the coordinator for the slave server's address
+      ClientContext context;
+      ServerInfo serverInfo;
+      ID id;
+      id.set_id(clusterID);
+      Status status = coord_stub_->GetSlaveInfo(&context, id, &serverInfo);
+
+      if(status.ok()){
+        string serverAddr = serverInfo.hostname() + ":" + serverInfo.port();
+        cout<< "Got slave server addr: " << serverAddr << endl;
+        // passes the request to Slave server
+        std::shared_ptr<Channel> channel2 = grpc::CreateChannel(serverAddr, grpc::InsecureChannelCredentials());
+        slave_stub_ = SNSService::NewStub(channel2,grpc::StubOptions());
+        cout << "Complete creating a slave server stub." << endl;
+        // Login
+        ClientContext context;
+        Request request;
+        Reply reply;
+        request.set_username(username);
+        Status status2 = slave_stub_->Login(&context, request, &reply);
+        if(status2.ok()){
+          cout<< "Slave server login success." << endl;
+        }else{
+          cout<< "Slave server login failed." << endl;
+        }
+      }else{
+        cout<< "Failed to get SlaveServer address." << endl;
+      }
+
+    }
+
     return Status::OK;
   }
 
@@ -324,30 +361,42 @@ class SNSServiceImpl final : public SNSService::Service {
 }; // end of class SNSServiceImpl
 
 // send the message to the coordinator every 5 sec.
-void Heartbeat(string coordinatorAddr, string clusterId, string serverId){
+void sendHeartbeat(string coordinatorAddr, string clusterId, string serverId){
 
   // Create a channel.
   std::shared_ptr<Channel> channel = grpc::CreateChannel(coordinatorAddr, grpc::InsecureChannelCredentials());
   // Create a coordinator stub.
-  stub_ = CoordService::NewStub(channel,grpc::StubOptions());
+  coord_stub_ = CoordService::NewStub(channel,grpc::StubOptions());
   //cout << "Complete creating a coordinator stub." << endl;
 
   while(true){
+    // sleep for 8 sec
+    sleep(8);
+
     // preapre heartbeat message
     ClientContext context;
     ServerInfo serverInfo;
-    serverInfo.set_clusterid(stoi(clusterId));
-    serverInfo.set_serverid(stoi(serverId));
+    serverInfo.set_clusterid(clusterID);
+    serverInfo.set_serverid(serverID);
     serverInfo.set_type("Active");
     Confirmation confirmation;
     // send heartbeat to the coordinator
     // cout<< coordinatorAddr<< "|| "<<clusterId<< "|| "<<serverId<< endl;
     // cout<< "stub:" << &stub_ <<" context:" << &context << " serverinfo:"<< &serverInfo << endl;
-    stub_->Heartbeat(&context, serverInfo, &confirmation);
     cout<< "Sent a heartbeat to the coordinator ("<< coordinatorAddr<< ")"<< endl;
+    coord_stub_->Heartbeat(&context, serverInfo, &confirmation);
 
-    //this_thread::sleep_for(chrono::seconds(5));
-    sleep(5);
+    
+    if(!isMaster){
+      // check if the type has became the Master
+      // which means the original Master failed, and the coord reassign the Slave
+      // to become a new Master
+      if(confirmation.type() == "M"){
+        isMaster = true;
+        cout<< "Server has became the Master!" << endl;
+      }
+    }
+
   }
 }
 
@@ -366,6 +415,8 @@ void RunServer(string clusterId, string serverId, string coordinatorIP, string c
   string serverIP = "0.0.0.0";
   std::string server_address = serverIP + ":" + port_no;
   SNSServiceImpl service;
+  clusterID = stoi(clusterId);
+  serverID = stoi(serverId);
 
   cout<< "Server start running. "<< endl<< "ClusterID: " << clusterId << ", ServerId: "<< serverId
     << ", CoordinatorIP: "<< coordinatorIP<< ", CoordinatorPort:" << coordinatorPort << endl;
@@ -382,22 +433,30 @@ void RunServer(string clusterId, string serverId, string coordinatorIP, string c
   // Create a channel.
   std::shared_ptr<Channel> channel = grpc::CreateChannel(coordinatorAddr, grpc::InsecureChannelCredentials());
   // Create a coordinator stub.
-  stub_ = CoordService::NewStub(channel,grpc::StubOptions());
+  coord_stub_ = CoordService::NewStub(channel,grpc::StubOptions());
 
   // send Register message
   ClientContext context;
   ServerInfo serverInfo;
-  serverInfo.set_clusterid(stoi(clusterId));
-  serverInfo.set_serverid(stoi(serverId));
+  serverInfo.set_clusterid(clusterID);
+  serverInfo.set_serverid(serverID);
   serverInfo.set_hostname(serverIP);
   serverInfo.set_port(port_no);
-  serverInfo.set_type("Register");
+  serverInfo.set_type("");
   Confirmation confirmation;
   // Status Heartbeat(ServerContext* context, const ServerInfo* serverinfo, Confirmation* confirmation) override {
-  stub_->Heartbeat(&context, serverInfo, &confirmation);
+  Status status = coord_stub_->Heartbeat(&context, serverInfo, &confirmation);
+  if(status.ok()){
+    cout<< "Server registered as: " << confirmation.type() << endl;
+    if(confirmation.type() == "M"){
+      isMaster = true;
+    }else{
+      isMaster = false;
+    }
+  }
 
   // create a new thread to send heartbeat periodically
-  thread thread(Heartbeat, coordinatorAddr, clusterId, serverId);
+  thread thread(sendHeartbeat, coordinatorAddr, clusterId, serverId);
 
   // create its own directory
   server_directroy_path = "server_" + clusterId + "_" + serverId;

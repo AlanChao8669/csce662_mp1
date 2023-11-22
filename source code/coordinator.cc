@@ -103,9 +103,11 @@ class CoordServiceImpl final : public CoordService::Service {
       server.last_heartbeat = getTimeNow();
       server.missed_heartbeat = false;
       cout<< "=> server timestamp(Update): "<< server.last_heartbeat<< endl;
+      // update current type (master/slave) and return it to the server
+      cout<< "update newest type: " << server.type << endl;
+      confirmation->set_type(server.type);
       v_mutex.unlock();
     }else{ // not found -> register the server
-      v_mutex.unlock();
       cout<< "Register for the new server..."<< endl;
       string serverIP = serverinfo->hostname();
       string serverPort = serverinfo->port();
@@ -117,10 +119,12 @@ class CoordServiceImpl final : public CoordService::Service {
       if(findServerIdxByType(*cluster,"M") != -1){
         // assign the sever as Slave
         new_server.type = "S";
+        confirmation->set_type("S");
         cout<< "register as a Slave." << endl;
       }else{
         // assign it as a Master
         new_server.type = "M";
+        confirmation->set_type("M");
         cout<< "register as a Master." << endl;
       }
       new_server.last_heartbeat = getTimeNow();
@@ -129,6 +133,7 @@ class CoordServiceImpl final : public CoordService::Service {
 
       cluster->push_back(new_server);
     }
+    v_mutex.unlock();
 
     return Status::OK;
   }
@@ -160,7 +165,34 @@ class CoordServiceImpl final : public CoordService::Service {
      
     return Status::OK;
   }
-  
+
+  // get slave server's address and return to the master server
+  Status GetSlaveInfo(ServerContext* context, const ID* id, ServerInfo* serverinfo) override {
+    string errMsg;
+    // find slave server info by clusterID
+    int clusterId = id->id();
+    vector<zNode> cluster = *(cluster_db[clusterId-1]); // clusterID begins from 1
+    int serverIdx = findServerIdxByType(cluster, "S"); // find Slave server
+    if(serverIdx == -1){
+      errMsg = "ERROR: Cannot find slave server in the cluster right now.";
+      cout<< errMsg << endl;
+      return Status(grpc::StatusCode::UNAVAILABLE, errMsg);
+    }
+    
+    zNode server = cluster[serverIdx];
+    // check whether the server is available (by miss_heartbeat)
+    if(server.missed_heartbeat){
+      errMsg = "Error: Slave server is missing heartbeat right now.";
+      return Status(grpc::StatusCode::UNAVAILABLE, errMsg);
+    }else{
+      serverinfo->set_hostname(server.hostname);
+      serverinfo->set_port(server.port);
+    }
+    // If server is active, return serverinfo
+    cout<<"Get slave info for master, clusterId: "<< clusterId << ",serverId: "<< server.serverID <<endl;
+     
+    return Status::OK;
+  }
 
 };
 
@@ -229,8 +261,7 @@ void checkHeartbeat(){
           cout<< ">>checking server,ID:" << s->serverID << endl;
           v_mutex.lock();
           if(difftime(now_time,s->last_heartbeat)>10){
-            cout<< "Haven't received heartbeat for over 10 sec!"<< endl; 
-            cout<< "(ServerId: "<< s->serverID<< ",last_heartbeat: "<< s->last_heartbeat<< ")" << endl;
+            cout<< "Haven't received hb for over 10 sec! (last: "<< s->last_heartbeat<< ")" << endl;
             if(!s->missed_heartbeat){ // first time missing heartbeat
               s->missed_heartbeat = true;
               s->last_heartbeat = now_time;
@@ -254,7 +285,7 @@ void checkHeartbeat(){
         }
       }
       
-      sleep(3); // sleep 3 second
+      sleep(10); // sleep 10 seconds
     }
 }
 
