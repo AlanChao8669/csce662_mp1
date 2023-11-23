@@ -96,10 +96,11 @@ std::unique_ptr<CoordService::Stub> coord_stub_;
 
 string server_directroy_path;
 // Master-Slave stuff
-bool isMaster;
-std::unique_ptr<SNSService::Stub> slave_stub_; // master use this to pass request to slave
 int clusterID;
 int serverID;
+bool isMaster;
+string slaveAddr;
+std::unique_ptr<SNSService::Stub> slave_stub_; // master use this to pass request to slave
 
 // find the index of the user in the client db by username
 int findClientIdx(string username){
@@ -133,8 +134,8 @@ class SNSServiceImpl final : public SNSService::Service {
 
   Status Follow(ServerContext* context, const Request* request, Reply* reply) override {
 
-    string username = request->username();
-    string follow_username = request->arguments(0);
+    string username = request->username(); // username = userid
+    string follow_username = request->arguments(0); // the user client want to follow
     cout<< username << " wants to follow "<< follow_username << endl;
 
     int user_idx = findClientIdx(username);
@@ -163,7 +164,38 @@ class SNSServiceImpl final : public SNSService::Service {
       // add follow_user to user's following list
       client_db[user_idx].client_following.push_back(&client_db[follow_user_idx]);
       client_db[follow_user_idx].client_followers.push_back(&client_db[user_idx]);
+      // add follow_user to client's following.txt
+      string user_following = server_directroy_path + "/" + username+"_following.txt";
+      fstream file(user_following, ios::app|ios::out);
+      if(!file.is_open()){
+        std::cerr << "Failed to open file: 1_following.txt" << std::endl;
+      }
+      // Append the new line to the file
+      file << follow_username << "||N" << endl;
+      file.close();
+
       cout<< username << " is now following "<< follow_username << endl;
+
+      // Master server should pass the request to Slave server
+      if(isMaster){
+        cout<< "Pass follow request to slave server" << slaveAddr << endl;
+        if(slaveAddr.empty()){
+          cout<< "Slave server addr is empty!" << endl;
+        }
+        // Follow
+        ClientContext context;
+        Request request;
+        Reply reply;
+        request.set_username(username);
+        request.add_arguments(follow_username);
+        Status status2 = slave_stub_->Follow(&context, request, &reply);
+        if(status2.ok()){
+          cout<< "Slave server follow success." << endl;
+        }else{
+          cout<< "Slave server follow failed." << endl;
+        }
+      }
+
       return Status::OK;
     }
     
@@ -242,6 +274,13 @@ class SNSServiceImpl final : public SNSService::Service {
       }
     }
     cout<< username + " " + reply_msg << endl;
+    // create files for the user
+    string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
+    string user_following = server_directroy_path + "/" + username+"_following.txt";
+    string user_followers = server_directroy_path + "/" + username+"_followers.txt";
+    createFile(user_timeline);
+    createFile(user_following);
+    createFile(user_followers);
 
     if(isMaster){ // Master server should pass the request to Slave server
       // ask the coordinator for the slave server's address
@@ -252,10 +291,10 @@ class SNSServiceImpl final : public SNSService::Service {
       Status status = coord_stub_->GetSlaveInfo(&context, id, &serverInfo);
 
       if(status.ok()){
-        string serverAddr = serverInfo.hostname() + ":" + serverInfo.port();
-        cout<< "Got slave server addr: " << serverAddr << endl;
+        slaveAddr = serverInfo.hostname() + ":" + serverInfo.port();
+        cout<< "Got slave server addr: " << slaveAddr << endl;
         // passes the request to Slave server
-        std::shared_ptr<Channel> channel2 = grpc::CreateChannel(serverAddr, grpc::InsecureChannelCredentials());
+        std::shared_ptr<Channel> channel2 = grpc::CreateChannel(slaveAddr, grpc::InsecureChannelCredentials());
         slave_stub_ = SNSService::NewStub(channel2,grpc::StubOptions());
         cout << "Complete creating a slave server stub." << endl;
         // Login
@@ -272,7 +311,6 @@ class SNSServiceImpl final : public SNSService::Service {
       }else{
         cout<< "Failed to get SlaveServer address." << endl;
       }
-
     }
 
     return Status::OK;
@@ -400,7 +438,7 @@ void sendHeartbeat(string coordinatorAddr, string clusterId, string serverId){
   }
 }
 
-
+// when server starts, create its own directory (if not exist!)
 void createFolder(string foldername) {
   std::filesystem::path folderpath(foldername);
 
