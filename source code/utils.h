@@ -35,3 +35,12 @@ inline vector<string> splitString(string &v, char delim){
   }
   return res;
 }
+
+inline bool createFile(string filePath) {
+  ofstream file(filePath);
+  if (file.is_open()) {
+    file.close();
+    return true;
+  }
+  return false;
+}
