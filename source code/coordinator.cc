@@ -32,6 +32,9 @@ using grpc::Status;
 using csce438::CoordService;
 using csce438::ServerInfo;
 using csce438::Confirmation;
+using csce438::UserList;
+using csce438::AddressList;
+using csce438::AddressInfo;
 using csce438::ID;
 // using csce438::ServerList;
 // using csce438::SynchService;
@@ -55,6 +58,9 @@ std::vector<zNode> cluster2;
 std::vector<zNode> cluster3;
 vector<vector<zNode>* > cluster_db(3);
 
+// follower synchronizer
+map<int, int> user_cluster; // key: userID, value: clusterID
+map<int, string> sync_addrs; // key: clusterID, value: address of follower synchronizer
 
 //func declarations
 int findServerIdx(std::vector<zNode> v, int id);
@@ -74,15 +80,21 @@ void checkHeartbeat();
 // }
 
 class CoordServiceImpl final : public CoordService::Service {
-
   
   Status Heartbeat(ServerContext* context, const ServerInfo* serverinfo, Confirmation* confirmation) override {
-    
     // get server info
     int clusterId = serverinfo->clusterid();
     int serverId = serverinfo->serverid();
     string type = serverinfo->type();
-
+    // check if it is a single heartbeat from the follower synchrnizer
+    if(type == "F"){
+      cout<< "Got Follower Synchronizer Heartbeat! (clusterID:"<< clusterId<<")"<<endl;
+      // register the follower synchronizer
+      sync_addrs[clusterId] = serverinfo->hostname() + ":" + serverinfo->port();
+      cout<< "=> Follower Synchronizer Address: " << sync_addrs[clusterId] << endl;
+      
+      return Status::OK;
+    }
     cout<<"Got Heartbeat! (clusterID:"<< clusterId<<",serverID:"<<serverId<<")"<<endl;
 
     // get the cluster 
@@ -162,7 +174,9 @@ class CoordServiceImpl final : public CoordService::Service {
     }
     // If server is active, return serverinfo
     cout<<"Get Server for client: "<<userId<<", clusterId: "<< clusterId << ",serverId: "<< server.serverID <<endl;
-     
+    // record the clusterId for the client
+    user_cluster[userId] = clusterId;
+
     return Status::OK;
   }
 
@@ -191,6 +205,24 @@ class CoordServiceImpl final : public CoordService::Service {
     // If server is active, return serverinfo
     cout<<"Get slave info for master, clusterId: "<< clusterId << ",serverId: "<< server.serverID <<endl;
      
+    return Status::OK;
+  }
+
+  // get follower synchronizer's address and return to the follower synchronizer
+  Status GetUsersAddrs (ServerContext* context, const UserList* userList, AddressList* addrList) {
+    /// find address of each user, store into map
+    for(int userID: userList->users()){
+      int clusterID = user_cluster[userID]; // TODO: check if clusterID exist
+      string address = sync_addrs[clusterID]; // TODO: check if address exist
+      // put the address into the address list
+      AddressInfo addressInfo;
+      addressInfo.set_userid(userID);
+      addressInfo.set_syncaddress(address);
+      cout<< "Get cluster"<< clusterID <<" address("<< address <<") for user " << userID << endl;
+      addrList->add_addressinfo()->CopyFrom(addressInfo);
+    }
+    
+
     return Status::OK;
   }
 

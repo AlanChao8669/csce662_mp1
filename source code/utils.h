@@ -20,6 +20,7 @@ inline string trimSpaces(string str) {
 //   return tokens;
 // }
 
+// Split a given string by a delimiter, return a vector of strings
 inline vector<string> splitString(string &v, char delim){
   vector<string> res;
   string tmp;
@@ -37,10 +38,18 @@ inline vector<string> splitString(string &v, char delim){
 }
 
 inline bool createFile(string filePath) {
-  ofstream file(filePath);
+  std::ofstream file(filePath);
   if (file.is_open()) {
     file.close();
     return true;
   }
   return false;
+}
+
+inline bool starts_with(const string& str, const string& prefix) {
+  return str.substr(0, prefix.length()) == prefix;
+}
+
+inline bool ends_with(const string& str, const string& suffix) {
+  return str.size() >= suffix.length() && str.substr(str.size() - suffix.length()) == suffix;
 }

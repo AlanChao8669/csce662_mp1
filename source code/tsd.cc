@@ -488,8 +488,10 @@ void RunServer(string clusterId, string serverId, string coordinatorIP, string c
     cout<< "Server registered as: " << confirmation.type() << endl;
     if(confirmation.type() == "M"){
       isMaster = true;
+      server_directroy_path = "server_M_" + clusterId + "_" + serverId;
     }else{
       isMaster = false;
+      server_directroy_path = "server_S_" + clusterId + "_" + serverId;
     }
   }
 
@@ -497,7 +499,6 @@ void RunServer(string clusterId, string serverId, string coordinatorIP, string c
   thread thread(sendHeartbeat, coordinatorAddr, clusterId, serverId);
 
   // create its own directory
-  server_directroy_path = "server_" + clusterId + "_" + serverId;
   createFolder(server_directroy_path);
 
   server->Wait();
