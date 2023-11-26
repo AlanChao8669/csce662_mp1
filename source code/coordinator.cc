@@ -210,10 +210,21 @@ class CoordServiceImpl final : public CoordService::Service {
 
   // get follower synchronizer's address and return to the follower synchronizer
   Status GetUsersAddrs (ServerContext* context, const UserList* userList, AddressList* addrList) {
+    cout<< "GetUsersAddrs() called." << endl;
     /// find address of each user, store into map
     for(int userID: userList->users()){
       int clusterID = user_cluster[userID]; // TODO: check if clusterID exist
+      // cout<< "clusterID: " << clusterID << endl;
+      if(clusterID == 0){
+        cout<< "ERROR: Cannot find cluster for user " << userID << endl;
+        continue;
+      }
       string address = sync_addrs[clusterID]; // TODO: check if address exist
+      cout<< "address: " << address << endl;
+      if(address == ""){
+        cout<< "ERROR: Cannot find address for cluster " << clusterID << endl;
+        continue;
+      }
       // put the address into the address list
       AddressInfo addressInfo;
       addressInfo.set_userid(userID);

@@ -12,7 +12,12 @@ service SynchService{
   //rpc GetAllUsers (ServerInfo) returns (Confirmation) {}
   //rpc GetTLFL (ID) returns (ServerInfo) {}
   rpc ResynchServer (Req) returns (Res) {}
-  // ZooKeeper API here
+  rpc UpdFollower(User_Follower) returns (Res) {}
+}
+
+message User_Follower{
+  int32 userId = 1;
+  repeated int32 followers = 2;
 }
 
 //server info message definition

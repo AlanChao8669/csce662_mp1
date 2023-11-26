@@ -44,6 +44,7 @@ using csce438::AddressInfo;
 using csce438::Req;
 using csce438::Res;
 using csce438::ID;
+using csce438::User_Follower;
 // using csce438::ServerList;
 using csce438::SynchService;
 // using csce438::AllUsers;
@@ -57,8 +58,12 @@ void run_synchronizer(std::string,std::string,std::string,int);
 std::vector<std::string> get_all_users_func(int);
 std::vector<std::string> get_tl_or_fl(int, int, bool);
 vector<string> get_files(int clusterID, string filetype);
+bool file_contains_user(std::string filename, std::string user);
+vector<string> get_user_file(int clusterID, int userID, string filetype);
+unique_ptr<SynchService::Stub> createSyncStub(string addr);
 
 std::unique_ptr<CoordService::Stub> coord_stub_;
+std::unique_ptr<SynchService::Stub> sync_stub_;
 
 class SynchServiceImpl final : public SynchService::Service {
     // Status GetAllUsers(ServerContext* context, const Confirmation* confirmation, AllUsers* allusers) override{
@@ -98,6 +103,30 @@ class SynchServiceImpl final : public SynchService::Service {
 
         // YOUR CODE HERE
 
+
+        return Status::OK;
+    }
+
+    Status UpdFollower(ServerContext* context, const User_Follower* user_follower, Res* res){
+        std::cout<<"Got UpdFollower()! Start updating followers file."<<std::endl;
+        int userID = user_follower->userid();
+        // get all [userID]_followers.txt file from Master and Slave server folders
+        vector<string> follower_files = get_user_file(clusterID, userID, "followers");
+        // add each new followers to the file
+        for(int followerID : user_follower->followers()){
+            std::cout<<"User "<< followerID <<" follows "<<userID<<std::endl;
+            for(string file : follower_files){
+                std::cout<<"Updating file: "<<file<<std::endl;
+                if(!file_contains_user(file, to_string(followerID))){
+                    cout<<"Adding "<<followerID<<" to "<<file<< endl;
+                    ofstream ofs(file, std::ios_base::app);
+                    ofs << followerID << std::endl;
+                    ofs.close();
+                }else{
+                    cout<<followerID<<" already in "<<file<<std::endl;
+                }
+            }
+        }
 
         return Status::OK;
     }
@@ -189,18 +218,21 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
     while(true){
         //change this to 30 eventually
         sleep(10);
-        cout<< "whooop!!" << endl;
+        cout<< ">> Start synchronization process" << endl;
 
         // Part1: Check following relationships
+        cout<< ">> Part 1: Check following updates" << endl;
         // get all following files in cluster //TODO: use muti threads to accelerate?
         std::map<int, std::vector<int>> followers; // ex: followers[1] = [2, 3, 4] (followed by 2, 3, 4)
         vector<string> following_files = get_files(clusterID, "following");
         // check each file
         for (const string& file : following_files) {
             string filename = file.substr(file.find_last_of("/") + 1);
-            cout<< "filename: " << filename << endl;
+            char type = file.substr(file.find("server_") + 7, 1)[0]; // M or S
             int follower_userid = stoi(filename.substr(0, filename.find_last_of("_")));
+            cout<< "filename: " << filename << ",type: "<< type << endl;
 
+            // start reading the file
             ifstream ifs(file);
             string tempfileName = file + ".mod";
             ofstream ofs(tempfileName);
@@ -208,18 +240,19 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
                 cerr << "Failed to open file: " << file << endl;
                 continue;
             }
-
             string line;
             while (getline(ifs, line)) {
                 if (ends_with(line, "N")) {
                     cout << "Line ends with N: " << line << endl;
                     int following_userid = stoi(line.substr(0, 1));
                     cout << "Following user id: " << following_userid << endl;
-                    // followers[following_userid] = vector<int>();
-                    followers[following_userid].push_back(following_userid);
-                    cout<< "followers[" << following_userid << "]: " << followers[following_userid].size() << endl;
+                    // add the following user to the list
+                    if(type == 'M'){
+                        followers[following_userid].push_back(follower_userid);
+                        cout<< "followers[" << following_userid << "]: " << followers[following_userid].size() << endl;
+                    }
                     // mark the line as updated
-                    //line += "||Y";
+                    line += "||Y";
                 }
                 ofs << line << endl;
             }
@@ -238,26 +271,44 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
             AddressList addressList;
             UserList userList;
             for (const auto& [key, value] : followers) {
-                cout << "Key: " << key << endl;
+                cout << "userID: " << key << endl;
                 userList.add_users(key);
-            }
-            // and send the followers to them
+            } // users that need to ask address
+
             Status status = coord_stub_->GetUsersAddrs(&context, userList, &addressList);
             if (status.ok()) {
                 cout << "GetUsersAddrs RPC succeeded." << endl;
                 for(AddressInfo addressInfo : addressList.addressinfo()){
                     cout << "AddressInfo: " << addressInfo.userid() << ":" << addressInfo.syncaddress() << endl;
+                    // start sending followers to other follower synchronizers.
+                    sync_stub_ = createSyncStub(addressInfo.syncaddress());
+                    ClientContext context2;
+                    User_Follower user_follower;
+                    user_follower.set_userid(addressInfo.userid());
+                    for(int follower : followers[addressInfo.userid()]){
+                        user_follower.add_followers(follower);
+                        cout<< "add follower: "<< follower << endl;
+                    }
+                    Res res;
 
+                    Status status2 = sync_stub_->UpdFollower(&context2, user_follower, &res);
+                    if(status2.ok()){
+                        cout << "UpdFollower() RPC succeeded."<<" user("<<addressInfo.userid()<<") updated."<< endl;
+                    } else {
+                        cout << "UpdFollower RPC failed." << endl;
+                    }
                 }
             } else {
                 cout << "GetUsersAddrs RPC failed." << endl;
             }
+
+
         }
         
 
 
         // Part2: Check timeline updates
-        
+        cout<< ">> Part 2: Check timeline updates" << endl;
         //synch all users file 
             //get list of all followers
 
@@ -291,23 +342,54 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
             //     // }
             // }
 
-        
+        cout<< ">> End synchronization process. Sleep 10 seconds." << endl;
     }// end while-loop
 
     return;
 }
 
-// get all files in specific server folder "server_M_[clusterID]_[serverID]"
-// which ends with "_[filetype].txt 
+// create a synchronizer stub for given address
+unique_ptr<SynchService::Stub> createSyncStub(string addr){
+    return SynchService::NewStub(grpc::CreateChannel(addr, grpc::InsecureChannelCredentials()));
+}
+
+// get all files in specific server folder "server_M(or S)_[clusterID]_[serverID]"
+// with the end "_[filetype].txt 
 // filetype can be: 1.followers/ 2.following/ 3.timeline
 vector<string> get_files(int clusterID, string filetype) {
   vector<string> files;
-
   for (path p : recursive_directory_iterator("./")) {
-    if (is_directory(p) && starts_with(p.filename().string(), "server_M_" + to_string(clusterID) + "_")) {
+    if (is_directory(p) && (starts_with(p.filename().string(), "server_M_" + to_string(clusterID) + "_")
+         || starts_with(p.filename().string(), "server_S_" + to_string(clusterID) + "_"))) {
       cout<< "checking directory: " << p.string() << endl;
       for (path q : recursive_directory_iterator(p)) {
         if (is_regular_file(q) && ends_with(q.filename().string(), "_" + filetype + ".txt")) {
+          files.push_back(q.string());
+          cout<< q.string() << ", " << endl;
+        }
+      }
+    }
+  }
+
+  return files;
+}
+
+// get all files in server's folder (both master and slave)
+// params:
+//  1. clusterID
+//  2. userID
+//  3. filetype: 1.followers/ 2.following/ 3.timeline
+// returns
+//  1. vector of file paths
+vector<string> get_user_file(int clusterID, int userID, string filetype) {
+  vector<string> files;
+  for (path p : recursive_directory_iterator("./")) {
+    if (is_directory(p) && (starts_with(p.filename().string(), "server_M_" + to_string(clusterID) + "_")
+         || starts_with(p.filename().string(), "server_S_" + to_string(clusterID) + "_"))) {
+      cout<< "checking directory: " << p.string() << endl;
+      for (path q : recursive_directory_iterator(p)) {
+        if (is_regular_file(q) && starts_with(q.filename().string(), to_string(userID) + "_")
+            && ends_with(q.filename().string(), "_" + filetype + ".txt")) {
           files.push_back(q.string());
           cout<< q.string() << ", " << endl;
         }

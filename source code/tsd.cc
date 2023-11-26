@@ -138,67 +138,39 @@ class SNSServiceImpl final : public SNSService::Service {
     string follow_username = request->arguments(0); // the user client want to follow
     cout<< username << " wants to follow "<< follow_username << endl;
 
-    int user_idx = findClientIdx(username);
-    int follow_user_idx = findClientIdx(follow_username);
-    
-    string errMsg;
-    
-    if(user_idx == follow_user_idx){ // check if user want to follow himself
-      errMsg = "Error: Cannot follow yourself!";
-      cout<< errMsg << endl;
-      return Status(grpc::StatusCode::INVALID_ARGUMENT, errMsg);
-    }else if(follow_user_idx < 0){  // check if follow_user exists
-      // follow_user does not exist
-      errMsg = follow_username + " does not exist.";
-      cout<< errMsg << endl;
-      return Status(grpc::StatusCode::NOT_FOUND, errMsg);
-    }else{ // chekck if user is already following follow_user
-      Client user = client_db[user_idx];
-      for(Client* c : user.client_following){
-        if(c->username == follow_username){
-          errMsg = "Error: Already following " + follow_username;
-          cout<< errMsg << endl;
-          return Status(grpc::StatusCode::CANCELLED , errMsg);
-        }
-      }
-      // add follow_user to user's following list
-      client_db[user_idx].client_following.push_back(&client_db[follow_user_idx]);
-      client_db[follow_user_idx].client_followers.push_back(&client_db[user_idx]);
-      // add follow_user to client's following.txt
-      string user_following = server_directroy_path + "/" + username+"_following.txt";
-      fstream file(user_following, ios::app|ios::out);
-      if(!file.is_open()){
-        std::cerr << "Failed to open file: 1_following.txt" << std::endl;
-      }
-      // Append the new line to the file
-      file << follow_username << "||N" << endl;
-      file.close();
-
-      cout<< username << " is now following "<< follow_username << endl;
-
-      // Master server should pass the request to Slave server
-      if(isMaster){
-        cout<< "Pass follow request to slave server" << slaveAddr << endl;
-        if(slaveAddr.empty()){
-          cout<< "Slave server addr is empty!" << endl;
-        }
-        // Follow
-        ClientContext context;
-        Request request;
-        Reply reply;
-        request.set_username(username);
-        request.add_arguments(follow_username);
-        Status status2 = slave_stub_->Follow(&context, request, &reply);
-        if(status2.ok()){
-          cout<< "Slave server follow success." << endl;
-        }else{
-          cout<< "Slave server follow failed." << endl;
-        }
-      }
-
-      return Status::OK;
+    // add follow_user to client's following.txt
+    string user_following = server_directroy_path + "/" + username+"_following.txt";
+    fstream file(user_following, ios::app|ios::out);
+    if(!file.is_open()){
+      std::cerr << "Failed to open file: "<< username<<"_following.txt" << std::endl;
     }
-    
+    // Append the new line to the file
+    file << follow_username << "||N" << endl;
+    file.close();
+
+    cout<< username << " is now following "<< follow_username << endl;
+
+    // Master server should pass the request to Slave server
+    if(isMaster){
+      cout<< "Pass follow request to slave server" << slaveAddr << endl;
+      if(slaveAddr.empty()){
+        cout<< "Slave server addr is empty!" << endl;
+      }
+      // Follow
+      ClientContext context;
+      Request request;
+      Reply reply;
+      request.set_username(username);
+      request.add_arguments(follow_username);
+      Status status2 = slave_stub_->Follow(&context, request, &reply);
+      if(status2.ok()){
+        cout<< "Slave server follow success." << endl;
+      }else{
+        cout<< "Slave server follow failed." << endl;
+      }
+    }
+
+    return Status::OK;
   }
 
   Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {
