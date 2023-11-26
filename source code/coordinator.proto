@@ -13,6 +13,7 @@ service CoordService{
   rpc GetServer (ID) returns (ServerInfo) {}
   rpc GetSlaveInfo (ID) returns (ServerInfo) {}
   rpc GetUsersAddrs (UserList) returns (AddressList) {}
+  rpc GetAllUsers (ID) returns (UserList) {}
   // ZooKeeper API here
 }
 

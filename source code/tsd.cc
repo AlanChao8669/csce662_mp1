@@ -72,6 +72,7 @@ using csce438::CoordService;
 using csce438::ServerInfo;
 using csce438::Confirmation;
 using csce438::ID;
+using csce438::UserList;
 using grpc::Channel;
 using grpc::ClientContext;
 using namespace std;
@@ -101,6 +102,7 @@ int serverID;
 bool isMaster;
 string slaveAddr;
 std::unique_ptr<SNSService::Stub> slave_stub_; // master use this to pass request to slave
+vector<string> readLines(int userID, string fileType);
 
 // find the index of the user in the client db by username
 int findClientIdx(string username){
@@ -117,16 +119,22 @@ int findClientIdx(string username){
 class SNSServiceImpl final : public SNSService::Service {
   
   Status List(ServerContext* context, const Request* request, ListReply* list_reply) override {
-    string username = request->username();
+    string username = request->username(); // equals userID
     cout<< username << " use List cmd."<< endl;
     // get all users
-    for(Client c : client_db){
-      list_reply->add_all_users(c.username);
+    ClientContext context2;
+    UserList userList;
+    ID id;
+    coord_stub_->GetAllUsers(&context2, id, &userList);
+    for(int userID : userList.users()){
+      list_reply->add_all_users(to_string(userID));
+      cout<< "user: " << userID << ", ";
     }
+    cout<< endl;
     // get followes of the current user
-    Client user = client_db[findClientIdx(username)];
-    for(Client* c : user.client_followers){
-      list_reply->add_followers(c->username);
+    vector<string> followers = readLines(stoi(username), "followers");
+    for(string follower : followers){
+      list_reply->add_followers(follower);
     }
 
     return Status::OK;
@@ -508,4 +516,28 @@ int main(int argc, char** argv) {
   RunServer(clusterId, serverId, coordinatorIP, coordinatorPort, port);
 
   return 0;
+}
+
+// read and get all lines in the file under the server directory
+// params:
+//   1. userID
+//   2. fileType (timeline, following, followers)
+vector<string> readLines(int userID, string fileType) {
+  string filePath = server_directroy_path+ "/"+ to_string(userID)+ "_" + fileType + ".txt";
+  vector<string> lines;
+
+  ifstream file(filePath);
+  if (!file.is_open()) {
+    cerr << "Failed to open file: " << filePath << endl;
+    return lines;
+  }
+
+  string line;
+  while (getline(file, line)) {
+    lines.push_back(line);
+  }
+
+  file.close();
+
+  return lines;
 }

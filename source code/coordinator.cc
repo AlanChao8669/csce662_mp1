@@ -232,8 +232,17 @@ class CoordServiceImpl final : public CoordService::Service {
       cout<< "Get cluster"<< clusterID <<" address("<< address <<") for user " << userID << endl;
       addrList->add_addressinfo()->CopyFrom(addressInfo);
     }
-    
 
+    return Status::OK;
+  }
+
+  // get all users for the server
+  Status GetAllUsers (ServerContext* context, const ID* id, UserList* userList) {
+    cout<< "GetAllUsers() called." << endl;
+    // find all users in the cluster
+    for (const auto& [key, value] : user_cluster) {
+      userList->add_users(key);
+    }
     return Status::OK;
   }
 
