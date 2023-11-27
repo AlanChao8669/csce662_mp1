@@ -229,38 +229,34 @@ class SNSServiceImpl final : public SNSService::Service {
     cout<<username<<" is trying to connect."<<endl;
     string reply_msg;
     // check if the username is already in the database
-    int user_idx=-1;
-    for(int i=0; i<client_db.size(); i++){
-      if(client_db[i].username == username){
-        user_idx = i;
+    // get all users
+    bool user_exist = false;
+    ClientContext context2;
+    UserList userList;
+    ID id;
+    coord_stub_->GetAllUsers(&context2, id, &userList);
+    for(int userID : userList.users()){
+      if(to_string(userID) == username){
+        user_exist = true;
+        cout<< "user " << userID << " already exist." << endl;
         break;
       }
     }
-    if(user_idx == -1){ // not exist, create a new client
-      Client new_client;
-      new_client.username = username;
-      client_db.push_back(new_client);
-      reply_msg = "registered and logged in successfully.";
+    if(!user_exist){
+      reply_msg = "registered new user successfully.";
       reply->set_msg(reply_msg);
-    }else{  // exist
-      Client *user = &client_db[user_idx];
-      if(user->connected){
-        reply_msg = "invalid username(Already exists).";
-        reply->set_msg(reply_msg);
-      }else{
-        user->connected = true;
-        reply_msg = "logged in successfully.";
-        reply->set_msg(reply_msg);
-      }
+      // create files for the user
+      string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
+      string user_following = server_directroy_path + "/" + username+"_following.txt";
+      string user_followers = server_directroy_path + "/" + username+"_followers.txt";
+      createFile(user_timeline);
+      createFile(user_following);
+      createFile(user_followers);
+    }else{
+      reply_msg = "logged in successfully.";
+      reply->set_msg(reply_msg);
     }
     cout<< username + " " + reply_msg << endl;
-    // create files for the user
-    string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
-    string user_following = server_directroy_path + "/" + username+"_following.txt";
-    string user_followers = server_directroy_path + "/" + username+"_followers.txt";
-    createFile(user_timeline);
-    createFile(user_following);
-    createFile(user_followers);
 
     if(isMaster){ // Master server should pass the request to Slave server
       // ask the coordinator for the slave server's address

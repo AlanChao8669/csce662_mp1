@@ -174,8 +174,17 @@ class CoordServiceImpl final : public CoordService::Service {
     }
     // If server is active, return serverinfo
     cout<<"Get Server for client: "<<userId<<", clusterId: "<< clusterId << ",serverId: "<< server.serverID <<endl;
-    // record the clusterId for the client
-    user_cluster[userId] = clusterId;
+    // record the clusterId for the client, if not exist.
+    bool user_exist = false;
+    for(const auto& [key, value] : user_cluster) {
+      if(key == userId){
+        user_exist = true;
+        break;
+      }
+    }
+    if(!user_exist){
+      user_cluster[userId] = clusterId;
+    }
 
     return Status::OK;
   }
