@@ -13,11 +13,17 @@ service SynchService{
   //rpc GetTLFL (ID) returns (ServerInfo) {}
   rpc ResynchServer (Req) returns (Res) {}
   rpc UpdFollower(User_Follower) returns (Res) {}
+  rpc UpdTimeline(User_Timeline) returns (Res) {}
 }
 
 message User_Follower{
   int32 userId = 1;
   repeated int32 followers = 2;
+}
+
+message User_Timeline{
+  int32 userId = 1;
+  repeated string posts = 2;
 }
 
 //server info message definition

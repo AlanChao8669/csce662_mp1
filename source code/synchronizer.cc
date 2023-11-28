@@ -45,6 +45,7 @@ using csce438::Req;
 using csce438::Res;
 using csce438::ID;
 using csce438::User_Follower;
+using csce438::User_Timeline;
 // using csce438::ServerList;
 using csce438::SynchService;
 // using csce438::AllUsers;
@@ -125,6 +126,26 @@ class SynchServiceImpl final : public SynchService::Service {
                 }else{
                     cout<<followerID<<" already in "<<file<<std::endl;
                 }
+            }
+        }
+
+        return Status::OK;
+    }
+
+    Status UpdTimeline(ServerContext* context, const User_Timeline* user_timeline, Res* res){
+        std::cout<<"Got User_Timeline()! Start updating timeline file."<<std::endl;
+        int userID = user_timeline->userid();
+        // get all [userID]_timeline.txt file from Master and Slave server folders
+        vector<string> timeline_files = get_user_file(clusterID, userID, "timeline");
+        // add each new post to the timeline file
+        for(string post : user_timeline->posts()){
+            std::cout<<"User "<< userID <<" got a new post: "<<post<<std::endl;
+            post += "||F" ; // mark the post as come from sync but not updated
+            for(string file : timeline_files){ // update timeline in master and slave directories
+                std::cout<<"Updating file: "<<file<<std::endl;
+                ofstream ofs(file, std::ios_base::app);
+                ofs << post << std::endl;
+                ofs.close();
             }
         }
 
@@ -223,7 +244,7 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         // Part1: Check following relationships
         cout<< ">> Part 1: Check following updates" << endl;
         // get all following files in cluster //TODO: use muti threads to accelerate?
-        std::map<int, std::vector<int>> followers; // ex: followers[1] = [2, 3, 4] (followed by 2, 3, 4)
+        map<int, vector<int>> followers; // ex: followers[1] = [2, 3, 4] (user 1 followed by 2, 3, 4)
         vector<string> following_files = get_files(clusterID, "following");
         // check each file
         for (const string& file : following_files) {
@@ -266,6 +287,7 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
         }// END for-loop for checking following files
         cout<< "followers.size(): " << followers.size() << endl;
         if(followers.size() > 0){
+          cout << " Start Updating Followers! ====================" << endl;
             // ask the coordinator for other follower synchronizer's addresses
             ClientContext context;
             AddressList addressList;
@@ -302,45 +324,102 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
                 cout << "GetUsersAddrs RPC failed." << endl;
             }
 
-
-        }
-        
+        }// END Part1: Check following relationships
 
 
         // Part2: Check timeline updates
         cout<< ">> Part 2: Check timeline updates" << endl;
-        //synch all users file 
-            //get list of all followers
+        // get all timeline files in cluster
+        map<int, vector<string>> new_posts; // ex: new_posts[1] = [post1, post2, ...] (key = user id)
+        vector<string> timeline_files = get_files(clusterID, "timeline");
+        // check each file if there is any new message
+        for (const string& file : timeline_files) {
+            string filename = file.substr(file.find_last_of("/") + 1);
+            char type = file.substr(file.find("server_") + 7, 1)[0]; // M or S
+            int userID = stoi(filename.substr(0, filename.find_last_of("_")));
+            cout<< "filename: " << filename << ",type: "<< type << endl;
+            // get the user's followers
+            vector<string> follower_files = get_user_file(clusterID, userID, "followers");
+            string follower_file = follower_files[0]; // whatever file is fine (Master or Slave)
+            vector<string> followers = get_lines_from_file(follower_file);
+            // start reading the timeline file
+            ifstream ifs(file);
+            string tempfileName = file + ".mod";
+            ofstream ofs(tempfileName);
+            if (!ifs.is_open()) {
+                cerr << "Failed to open file: " << file << endl;
+                continue;
+            }
+            string line;
+            while (getline(ifs, line)) {
+              // only check the user's own post
+              if(starts_with(line, "@||")){
+                if (ends_with(line, "||N")) {// not updated yet
+                  cout << "Line ends with N: " << line << endl;
+                  if(type == 'M'){
+                    string post = line;
+                    // add new posts to each follower
+                    for(string follower : followers){
+                      // formatted the line bf storing it.
+                      string temp_post = post;
+                      temp_post.erase(0, 3); // Remove "@||" from the beginning
+                      temp_post.erase(temp_post.length() - 3); // Remove "||N" from the end
+                      new_posts[stoi(follower)].push_back(temp_post);
+                    }
+                  }
+                  // mark the line as updated
+                  line += "||Y";
+                }
+              }
+              ofs << line << endl;
+            }
 
-            // YOUR CODE HERE
-            //set up stub
-            //send each a GetAllUsers request
-            //aggregate users into a list
-            //sort list and remove duplicates
+            ifs.close();
+            ofs.close();
+            // replace the old file with the new one
+            remove(file);
+            rename(tempfileName.c_str(), file);
+        } // END for-loop for checking timeline files
+        // if there is updated timeline?
+        cout<< "new_posts.size(): " << new_posts.size() << endl;
+        if(new_posts.size() > 0){
+          cout << " Start Updating Timeline! ====================" << endl;
+          // ask the coordinator for other follower synchronizer's addresses
+          ClientContext context;
+          AddressList addressList;
+          UserList userList;
+          for (const auto& [key, value] : new_posts) {
+              cout << "timeline userID: " << key << endl;
+              userList.add_users(key);
+          } // users that need to ask address
+          Status status = coord_stub_->GetUsersAddrs(&context, userList, &addressList);
+          if (status.ok()) {
+              cout << "GetUsersAddrs RPC succeeded." << endl;
+              for(AddressInfo addressInfo : addressList.addressinfo()){
+                  cout << "AddressInfo: " << addressInfo.userid() << ":" << addressInfo.syncaddress() << endl;
+                  // start sending followers to other follower synchronizers.
+                  sync_stub_ = createSyncStub(addressInfo.syncaddress());
+                  ClientContext context2;
+                  Res res;
+                  User_Timeline user_timeline;
+                  user_timeline.set_userid(addressInfo.userid());
+                  for(string post : new_posts[addressInfo.userid()]){
+                    cout<< "add post: "<< post << endl;
+                    user_timeline.add_posts(post);
+                  }
 
-            // YOUR CODE HERE
-
-            //for all the found users
-            //if user not managed by current synch
-            // ...
- 
-            // YOUR CODE HERE
-
-	    //force update managed users from newly synced users
-            //for all users
-            // for(auto i : aggregated_users){
-            //     //get currently managed users
-            //     //if user IS managed by current synch
-            //         //read their follower lists
-            //         //for followed users that are not managed on cluster
-            //         //read followed users cached timeline
-            //         //check if posts are in the managed tl
-            //         //add post to tl of managed user    
-            
-            //          // YOUR CODE HERE
-            //     //     }
-            //     // }
-            // }
+                  Status status2 = sync_stub_->UpdTimeline(&context2, user_timeline, &res);
+                  if(status2.ok()){
+                      cout << "UpdTimeline() RPC succeeded."<<" user("<<addressInfo.userid()<<") updated."<< endl;
+                  } else {
+                      cout << "UpdTimeline RPC failed." << endl;
+                  }
+              }
+          } else {
+              cout << "GetUsersAddrs RPC failed." << endl;
+          }
+        } // END for-loop for each user that has new posts
+        
 
         cout<< ">> End synchronization process. Sleep 10 seconds." << endl;
     }// end while-loop

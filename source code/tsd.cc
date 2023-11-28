@@ -228,34 +228,15 @@ class SNSServiceImpl final : public SNSService::Service {
     string username = request->username();
     cout<<username<<" is trying to connect."<<endl;
     string reply_msg;
-    // check if the username is already in the database
-    // get all users
-    bool user_exist = false;
-    ClientContext context2;
-    UserList userList;
-    ID id;
-    coord_stub_->GetAllUsers(&context2, id, &userList);
-    for(int userID : userList.users()){
-      if(to_string(userID) == username){
-        user_exist = true;
-        cout<< "user " << userID << " already exist." << endl;
-        break;
-      }
-    }
-    if(!user_exist){
-      reply_msg = "registered new user successfully.";
-      reply->set_msg(reply_msg);
-      // create files for the user
-      string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
-      string user_following = server_directroy_path + "/" + username+"_following.txt";
-      string user_followers = server_directroy_path + "/" + username+"_followers.txt";
-      createFile(user_timeline);
-      createFile(user_following);
-      createFile(user_followers);
-    }else{
-      reply_msg = "logged in successfully.";
-      reply->set_msg(reply_msg);
-    }
+    // create files for the user (if not exist!)
+    string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
+    string user_following = server_directroy_path + "/" + username+"_following.txt";
+    string user_followers = server_directroy_path + "/" + username+"_followers.txt";
+    createFile(user_timeline);
+    createFile(user_following);
+    createFile(user_followers);
+    reply_msg = "logged in successfully.";
+    reply->set_msg(reply_msg);
     cout<< username + " " + reply_msg << endl;
 
     if(isMaster){ // Master server should pass the request to Slave server
@@ -296,80 +277,138 @@ class SNSServiceImpl final : public SNSService::Service {
 		ServerReaderWriter<Message, Message>* stream) override {
 
     Message msg;
-    string formatted_msg;
+    vector<Message> msg_buffer;
+    int userID;
+    // bool check_upd_started = false;
+    // use a message buffer 
 
-    while(stream->Read(&msg)) {
-      cout <<"Receive post From["+msg.username()+"]: " <<msg.msg()<<endl;
-      int user_idx = findClientIdx(msg.username());
-      Client* user = &client_db[user_idx];
-
-      // first time into timeline mode?
-      if(msg.msg() == "First_time_timeline"){
-        user->stream = stream; // record user's stream
-
-        // get 20 newest posts from user's following.txt
-        string line;
-        vector<string> newest_twenty;
-        ifstream in(msg.username()+"_following.txt");
-        int count = 0;
-        cout<< "following file size: " << user->following_file_size << endl;
-        while(getline(in, line)){
-          if(user->following_file_size > 20){
-	          if(count <= user->following_file_size-20){
-              count++;
-	            continue;
-            }
-          }
-          newest_twenty.push_back(line);
-        }
-        cout<< "size: " << newest_twenty.size() << endl;
-
-        //Send the newest messages to the client
-        Message new_msg; 
-        for(int i = newest_twenty.size(); i>0; i--){
-          if(newest_twenty[i].empty()) continue;
-          cout<< "newest:" << newest_twenty[i]<< endl;
-          vector<string> post_data = splitString(newest_twenty[i], '|');
-          cout<< "time_str:" << post_data[0] << " , username:" << post_data[1] << ", msg:" << post_data[2] << endl;
-          new_msg.set_time_str(post_data[0]);
-          new_msg.set_username(post_data[1]);
-          new_msg.set_msg(post_data[2]);
-          stream->Write(new_msg);
-        }   
-        continue; // end of first timeline mode processing
-
-      }else{ // not the first time into timeline mode
-        // format the message before storing it.
+    // thread that keeps reading messages from the client
+    thread reader([&msg, stream, &msg_buffer](){
+      while(stream->Read(&msg)){
+        cout <<"Receive Post From["+msg.username()+"]: " <<msg.msg()<<endl;
+        // use a message buffer to store the posts from user
+        Message temp_msg;
         string time = google::protobuf::util::TimeUtil::ToString(msg.timestamp());
-        msg.set_time_str(time);
-        formatted_msg = time+"|"+msg.username()+"|"+msg.msg()+"\n"; // user '|' as delimeter
-        cout<< formatted_msg;
-        // store user's post to user_timeline.txt
-        string user_timeline = server_directroy_path + "/" + msg.username()+"_timeline.txt";
-        ofstream user_file(user_timeline, ios::app|ios::out|ios::in);
-        user_file << formatted_msg;
-        user_file.close();
+        temp_msg.set_time_str(time);
+        temp_msg.set_username(msg.username());
+        temp_msg.set_msg(msg.msg());
+        msg_buffer.push_back(temp_msg);
       }
+    });
 
-      // get all followers of the current user
-      for(Client* follower : user->client_followers){
-        cout<< "write post from["+user->username+"] to ["+follower->username +"]"<< endl;
-        // write the message to the follower's stream(if connected and in chat mode)
-        if(follower->connected && follower->stream != 0){
-          cout<< "write to stream:" << follower->stream << endl;
-          follower->stream->Write(msg);
-        }
-        // write the message to the follower's following file
-        string fileName = follower->username + "_following.txt";
-        ofstream following_file(fileName, ios::app|ios::out|ios::in);
-        following_file << formatted_msg;
-        following_file.close();
-        follower->following_file_size++; // record current following file size
-      }
+    // thread that keeps processing messages in the buffer every 5 sec
+    thread process([&userID, stream, &msg_buffer](){
+      while(1){
+        cout<< "Start check timeline message buffer." << endl;
+        while (!msg_buffer.empty()){        
+          Message msg = msg_buffer.front();
+          msg_buffer.erase(msg_buffer.begin());
+          // Start processing the message
+          // > Check if it's first time into timeline mode?
+          if(msg.msg() == "First_time_timeline"){
+            userID = stoi(msg.username()); // record user's id
+            // get newest posts from user's timeline.txt
+            // read file in the server directory
+            string line;
+            vector<string> newest_twenty;
+            string user_timeline = server_directroy_path + "/" + msg.username()+"_timeline.txt";
+            ifstream in(user_timeline);
+            cout<< "Get newest posts from user's timeline.txt" << endl;
+            while(getline(in, line)){
+              // skip user's own posts
+              if(starts_with(line, "@||")){
+                continue;
+              }else{
+                newest_twenty.push_back(line);
+                cout<< "get line:" << line << endl;
+              }
+            }
+            cout<< "Posts size: " << newest_twenty.size() << endl;
 
-    }
+            //Send the newest messages to the client
+            Message new_msg;
+            int output_position = newest_twenty.size(); // record the position of the output post (from sync)
+            //for(int i = newest_twenty.size(); i>=0; --i){
+            for(string str : newest_twenty){
+              if(str.empty()) continue; // skip empty line
+              cout<< "newest:" << str << endl;
+              string post = str.substr(0, str.size()-3); // remove "||F"
+              cout<< "processed post:" << post<< endl;
+              vector<string> post_data = splitString(post, '|');
+              cout<< "time_str:" << post_data[0] << " , username:" << post_data[1] << ", msg:" << post_data[2] << endl;
+              new_msg.set_time_str(post_data[0]);
+              new_msg.set_username(post_data[1]);
+              new_msg.set_msg(post_data[2]);
+              stream->Write(new_msg);
+            }
 
+            // start a new thread to check if there is new posts
+            try {
+              thread writer([&output_position, userID, stream](){
+                // start checking user's timeline every 5 sec
+                while(1){
+                  sleep(5);
+                  cout<< "check user "<< userID <<"'s timeline every 5 sec." << endl;
+                  cout<< "output_position:" << output_position << endl;
+                  // read user's timeline file
+                  vector<string> lines = readLines(userID, "timeline");
+                  // start output new posts to client
+                  int position = 0;
+                  for(string line : lines){
+                    if(starts_with(line, "@||")) continue; // skip user's own posts
+                    if(ends_with(line, "||F")){ // come from sync but not updated
+                      position++;
+                      if(position <= output_position){
+                        continue;
+                      }else{
+                        output_position++;
+                        cout<< "line:" << line<< endl;
+                        string post = line.substr(0, line.size()-3); // remove "||F"
+                        // send new post to client
+                        vector<string> post_data = splitString(post, '|');
+                        cout<< "time_str:" << post_data[0] << " , username:" << post_data[1] << ", msg:" << post_data[2] << endl;
+                        Message new_msg;
+                        new_msg.set_time_str(post_data[0]);
+                        new_msg.set_username(post_data[1]);
+                        new_msg.set_msg(post_data[2]);
+                        stream->Write(new_msg);
+                      }
+                    }
+                  } // END checking user's timeline file
+
+                }// END of while(1), sleep 5 sec and check again.
+              });
+              writer.detach();
+            } catch (const std::exception& e) {
+              std::cerr << "Exception: " << e.what() << std::endl;
+            }
+            continue; 
+            // end of first timeline mode processing
+          }else{ // (Not first time into timeline mode)
+            // format the message before storing it.
+            string time = google::protobuf::util::TimeUtil::ToString(msg.timestamp());
+            msg.set_time_str(time);
+            string post = msg.msg();
+            string str = post.erase(post.length() - 1); // Remove newline character
+            string formatted_msg = "@||" + time+"|"+msg.username()+"|"+str+"||N\n"; // use '|' as delimeter
+            cout<< "formatted message: " << formatted_msg;
+            // store user's post to user_timeline.txt
+            string user_timeline = server_directroy_path + "/" + msg.username()+"_timeline.txt";
+            ofstream user_file(user_timeline, ios::app|ios::out|ios::in);
+            user_file << formatted_msg; // write new post to user's timeline file
+            user_file.close();
+          }
+        }// END of while(!msg_buffer.empty()), sleep 5 sec and check again.
+        
+        sleep(5);
+      }// END of while(1)
+    });
+
+    reader.join();
+    process.join();
+    
     return Status::OK;
+    
   }
 
 }; // end of class SNSServiceImpl
