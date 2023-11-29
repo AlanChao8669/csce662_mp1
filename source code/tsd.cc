@@ -306,8 +306,12 @@ class SNSServiceImpl final : public SNSService::Service {
         cout <<"[Timeline] Receive Post From["+msg.username()+"]: " <<msg.msg()<<endl;
         // use a message buffer to store the posts from user
         Message temp_msg;
-        string time = google::protobuf::util::TimeUtil::ToString(msg.timestamp());
+        google::protobuf::Timestamp* timestamp = new google::protobuf::Timestamp();
+        timestamp->set_seconds(std::time(nullptr));
+        timestamp->set_nanos(0);
+        string time = google::protobuf::util::TimeUtil::ToString(*timestamp);
         temp_msg.set_time_str(time);
+        cout<< "time_str:" << temp_msg.time_str() << endl;
         temp_msg.set_username(msg.username());
         temp_msg.set_msg(msg.msg());
         msg_buffer.push_back(temp_msg);
@@ -418,8 +422,7 @@ class SNSServiceImpl final : public SNSService::Service {
             // end of first timeline mode processing
           }else{ // (Not first time into timeline mode)
             // format the message before storing it.
-            string time = google::protobuf::util::TimeUtil::ToString(msg.timestamp());
-            msg.set_time_str(time);
+            string time = msg.time_str();
             string post = msg.msg();
             string str = post.erase(post.length() - 1); // Remove newline character
             string formatted_msg = "@||" + time+"|"+msg.username()+"|"+str+"||N\n"; // use '|' as delimeter
