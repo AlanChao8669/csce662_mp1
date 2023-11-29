@@ -77,9 +77,9 @@ using grpc::Channel;
 using grpc::ClientContext;
 using namespace std;
 
-struct Client {
+struct Client { // after mp2.2, this obj is used to store timeline connection info
   std::string username;
-  bool connected = true;
+  bool timeline_connected = false;
   int following_file_size = 0;
   std::vector<Client*> client_followers;
   std::vector<Client*> client_following;
@@ -228,18 +228,36 @@ class SNSServiceImpl final : public SNSService::Service {
     string username = request->username();
     cout<<username<<" is trying to connect."<<endl;
     string reply_msg;
-    // create files for the user (if not exist!)
-    string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
-    string user_following = server_directroy_path + "/" + username+"_following.txt";
-    string user_followers = server_directroy_path + "/" + username+"_followers.txt";
-    createFile(user_timeline);
-    createFile(user_following);
-    createFile(user_followers);
-    reply_msg = "logged in successfully.";
-    reply->set_msg(reply_msg);
+    // check if the user is already in client_db
+    int user_idx = findClientIdx(username);
+    bool reconnect = false;
+
+    if(user_idx == -1){ // user not found in client_db
+      reply_msg = "registered new user successfully.";
+      reply->set_msg(reply_msg);
+      // create files for the user
+      string user_timeline = server_directroy_path + "/" + username+"_timeline.txt";
+      string user_following = server_directroy_path + "/" + username+"_following.txt";
+      string user_followers = server_directroy_path + "/" + username+"_followers.txt";
+      createFile(user_timeline);
+      createFile(user_following);
+      createFile(user_followers);
+      // also record client connection in the client_db
+      Client new_client;
+      new_client.username = username;
+      new_client.timeline_connected = false;
+      client_db.push_back(new_client);
+    }else{
+      reply_msg = "logged in successfully.";
+      reply->set_msg(reply_msg);
+      // update client timeline connection status
+      Client* user = &client_db[user_idx];
+      user->timeline_connected = false;
+      reconnect = true;
+    }
     cout<< username + " " + reply_msg << endl;
 
-    if(isMaster){ // Master server should pass the request to Slave server
+    if(isMaster && !reconnect){ // Master server should pass the request to Slave server
       // ask the coordinator for the slave server's address
       ClientContext context;
       ServerInfo serverInfo;
@@ -285,7 +303,7 @@ class SNSServiceImpl final : public SNSService::Service {
     // thread that keeps reading messages from the client
     thread reader([&msg, stream, &msg_buffer](){
       while(stream->Read(&msg)){
-        cout <<"Receive Post From["+msg.username()+"]: " <<msg.msg()<<endl;
+        cout <<"[Timeline] Receive Post From["+msg.username()+"]: " <<msg.msg()<<endl;
         // use a message buffer to store the posts from user
         Message temp_msg;
         string time = google::protobuf::util::TimeUtil::ToString(msg.timestamp());
@@ -299,7 +317,8 @@ class SNSServiceImpl final : public SNSService::Service {
     // thread that keeps processing messages in the buffer every 5 sec
     thread process([&userID, stream, &msg_buffer](){
       while(1){
-        cout<< "Start check timeline message buffer." << endl;
+        sleep(5);  // sleep first so that the post can be stored into the msg buffer
+        cout<< "[Timeline] Start check timeline message buffer." << endl;
         while (!msg_buffer.empty()){        
           Message msg = msg_buffer.front();
           msg_buffer.erase(msg_buffer.begin());
@@ -307,6 +326,11 @@ class SNSServiceImpl final : public SNSService::Service {
           // > Check if it's first time into timeline mode?
           if(msg.msg() == "First_time_timeline"){
             userID = stoi(msg.username()); // record user's id
+            // set user's timeline connection status
+            int user_idx = findClientIdx(msg.username());
+            Client* user = &client_db[user_idx];
+            user->timeline_connected = true;
+
             // get newest posts from user's timeline.txt
             // read file in the server directory
             string line;
@@ -348,7 +372,14 @@ class SNSServiceImpl final : public SNSService::Service {
                 // start checking user's timeline every 5 sec
                 while(1){
                   sleep(5);
-                  cout<< "check user "<< userID <<"'s timeline every 5 sec." << endl;
+                  // chek user timeline connection status
+                  int user_idx = findClientIdx(to_string(userID));
+                  Client* user = &client_db[user_idx];
+                  if(!user->timeline_connected){ // user is NOT in timeline mode
+                    cout<< "[Timeline] User " << userID << " NOT in timeline mode." << endl;
+                    break;
+                  }
+                  cout<< "[Timeline] Check user "<< userID <<"'s timeline every 5 sec." << endl;
                   cout<< "output_position:" << output_position << endl;
                   // read user's timeline file
                   vector<string> lines = readLines(userID, "timeline");
@@ -377,6 +408,7 @@ class SNSServiceImpl final : public SNSService::Service {
                   } // END checking user's timeline file
 
                 }// END of while(1), sleep 5 sec and check again.
+                cout<< "[Timeline] End checking user "<< userID <<"'s timeline." << endl;
               });
               writer.detach();
             } catch (const std::exception& e) {
@@ -398,10 +430,18 @@ class SNSServiceImpl final : public SNSService::Service {
             user_file << formatted_msg; // write new post to user's timeline file
             user_file.close();
           }
+
         }// END of while(!msg_buffer.empty()), sleep 5 sec and check again.
+        // chek user timeline connection status
+        int user_idx = findClientIdx(to_string(userID));
+        Client* user = &client_db[user_idx];
+        if(!user->timeline_connected){ // user is not in timeline mode
+          cout<< "[Timeline] User " << to_string(userID) << " reconnect and NOT in timeline mode." << endl;
+          break;
+        }
         
-        sleep(5);
       }// END of while(1)
+      cout<< "[Timeline] End process() timeline msg buffer." << endl;
     });
 
     reader.join();

@@ -365,6 +365,7 @@ void run_synchronizer(std::string coordIP, std::string coordPort, std::string po
                       temp_post.erase(0, 3); // Remove "@||" from the beginning
                       temp_post.erase(temp_post.length() - 3); // Remove "||N" from the end
                       new_posts[stoi(follower)].push_back(temp_post);
+                      cout<< "Add new post: "<< temp_post << " to list. "<< endl;
                     }
                   }
                   // mark the line as updated

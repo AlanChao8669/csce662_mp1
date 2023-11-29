@@ -15,7 +15,7 @@ void IClient::run()
     displayCommandReply(cmd, reply);
     if (reply.grpc_status.ok() && reply.comm_status == SUCCESS
 	&& cmd == "TIMELINE") {
-      std::cout << "Now you are in the timeline" << std::endl;
+      std::cout << "Now you are in the timeline" << std::endl << "(Searching old posts...)" << std::endl;
       processTimeline();
     }
   }
