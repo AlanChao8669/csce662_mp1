@@ -63,6 +63,7 @@ using grpc::ServerReader;
 using grpc::ServerReaderWriter;
 using grpc::ServerWriter;
 using grpc::Status;
+using grpc::ClientReaderWriter;
 using csce438::Message;
 using csce438::ListReply;
 using csce438::Request;
@@ -103,6 +104,7 @@ bool isMaster;
 string slaveAddr;
 std::unique_ptr<SNSService::Stub> slave_stub_; // master use this to pass request to slave
 vector<string> readLines(int userID, string fileType);
+bool registerSlave(int clusterID);
 
 // find the index of the user in the client db by username
 int findClientIdx(string username){
@@ -298,10 +300,18 @@ class SNSServiceImpl final : public SNSService::Service {
     vector<Message> msg_buffer;
     int userID;
     // bool check_upd_started = false;
-    // use a message buffer 
+    // use a message buffer
+    shared_ptr<ClientReaderWriter<Message, Message>> slave_stream;
+    ClientContext c_context;
+    if(isMaster){
+      if(slaveAddr.empty()){
+        registerSlave(clusterID);
+      }
+      slave_stream = shared_ptr<ClientReaderWriter<Message, Message>>(slave_stub_->Timeline(&c_context));
+    }
 
     // thread that keeps reading messages from the client
-    thread reader([&msg, stream, &msg_buffer](){
+    thread reader([&msg, stream, &msg_buffer, &slave_stream](){
       while(stream->Read(&msg)){
         cout <<"[Timeline] Receive Post From["+msg.username()+"]: " <<msg.msg()<<endl;
         // use a message buffer to store the posts from user
@@ -315,6 +325,18 @@ class SNSServiceImpl final : public SNSService::Service {
         temp_msg.set_username(msg.username());
         temp_msg.set_msg(msg.msg());
         msg_buffer.push_back(temp_msg);
+        if(isMaster){
+          if(slaveAddr.empty()){
+            if(registerSlave(clusterID)){
+              ClientContext c_context;
+              slave_stream = shared_ptr<ClientReaderWriter<Message, Message>>(slave_stub_->Timeline(&c_context));
+              slave_stream->Write(temp_msg);
+            }
+          }else{
+            slave_stream->Write(temp_msg);
+          }
+        }
+
       }
     });
 
@@ -618,4 +640,28 @@ vector<string> readLines(int userID, string fileType) {
   file.close();
 
   return lines;
+}
+
+// ask the coordinator for the slave server's address
+// and then create the slave server stub
+bool registerSlave(int clusterID){
+  ClientContext context;
+  ServerInfo serverInfo;
+  ID id;
+  id.set_id(clusterID);
+
+  Status status = coord_stub_->GetSlaveInfo(&context, id, &serverInfo);
+  if(status.ok()){
+    slaveAddr = serverInfo.hostname() + ":" + serverInfo.port();
+    cout<< "Got slave server addr: " << slaveAddr << endl;
+  }else{
+    cout<< "Failed to get SlaveServer address." << endl;
+    return false;
+  }
+
+  // Register the Slave server
+  std::shared_ptr<Channel> channel2 = grpc::CreateChannel(slaveAddr, grpc::InsecureChannelCredentials());
+  slave_stub_ = SNSService::NewStub(channel2,grpc::StubOptions());
+  cout << "Complete creating a slave server stub." << endl;
+  return true;
 }
