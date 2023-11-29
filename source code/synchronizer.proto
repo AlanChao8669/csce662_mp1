@@ -1,0 +1,49 @@
+syntax = "proto3";
+package csce438;
+import "google/protobuf/timestamp.proto";
+
+// ------------------------------------------------------------
+// The synchronizer service definition
+// These are the different functionalities exposed by service
+// ------------------------------------------------------------
+
+//
+service SynchService{
+  //rpc GetAllUsers (ServerInfo) returns (Confirmation) {}
+  //rpc GetTLFL (ID) returns (ServerInfo) {}
+  rpc ResynchServer (Req) returns (Res) {}
+  rpc UpdFollower(User_Follower) returns (Res) {}
+  rpc UpdTimeline(User_Timeline) returns (Res) {}
+}
+
+message User_Follower{
+  int32 userId = 1;
+  repeated int32 followers = 2;
+}
+
+message User_Timeline{
+  int32 userId = 1;
+  repeated string posts = 2;
+}
+
+//server info message definition
+message Req{
+  int32 serverID = 1;
+  string hostname = 2;
+  string port = 3;
+  string type = 4;
+  int32 clusterID = 5;
+}
+
+//confirmation message definition
+message Res{
+  bool status = 1;
+  string type = 2;
+}
+
+//id message definition
+//message ID{
+//  int32 id = 1;
+//}
+
+

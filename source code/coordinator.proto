@@ -11,7 +11,24 @@ import "google/protobuf/timestamp.proto";
 service CoordService{
   rpc Heartbeat (ServerInfo) returns (Confirmation) {}
   rpc GetServer (ID) returns (ServerInfo) {}
+  rpc GetSlaveInfo (ID) returns (ServerInfo) {}
+  rpc GetUsersAddrs (UserList) returns (AddressList) {}
+  rpc GetAllUsers (ID) returns (UserList) {}
   // ZooKeeper API here
+}
+
+// message to ask coordinator about the synchronizer's address of other UserList
+message UserList{
+  repeated int32 users = 1;
+}
+
+message AddressInfo{
+  string syncAddress = 1;
+  int32 userId = 2;
+}
+
+message AddressList{
+  repeated AddressInfo addressInfo = 1;
 }
 
 //server info message definition
@@ -26,6 +43,7 @@ message ServerInfo{
 //confirmation message definition
 message Confirmation{
   bool status = 1;
+  string type = 2;
 }
 
 //id message definition

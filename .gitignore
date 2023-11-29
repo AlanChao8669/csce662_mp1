@@ -52,3 +52,13 @@ source code/sns.pb.h
 source code/tsd
 
 source code.zip
+
+source code/synchronizer.pb.h
+
+source code/synchronizer.pb.cc
+
+source code/synchronizer.grpc.pb.h
+
+source code/synchronizer.grpc.pb.cc
+
+source code/synchronizer
