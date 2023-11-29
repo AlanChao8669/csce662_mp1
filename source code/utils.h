@@ -1,6 +1,7 @@
 #include <string>
 #include <iostream>
 using namespace std;
+namespace fs = std::filesystem;
 
 // trim first and last spaces of a string
 inline string trimSpaces(string str) {
@@ -44,6 +45,27 @@ inline bool createFile(string filePath) {
     return true;
   }
   return false;
+}
+
+void copyFiles(string src, string dest){
+  // Check if the source directory exists
+  if (!fs::exists(src)) {
+    std::cerr << "Error: Source directory '" << src << "' does not exist" << std::endl;
+    return;
+  }
+
+  // Create the destination directory
+  fs::create_directory(dest);
+
+  // Copy all files from source to destination
+  for (const auto& entry : fs::recursive_directory_iterator(src)) {
+    if (entry.is_directory()) {
+      continue;
+    }
+    const fs::path source_path = entry.path();
+    const fs::path destination_path = fs::path(dest) / entry.path().filename();
+    fs::copy(source_path, destination_path);
+  }
 }
 
 inline bool starts_with(const string& str, const string& prefix) {

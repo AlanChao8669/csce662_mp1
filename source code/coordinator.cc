@@ -317,7 +317,8 @@ void checkHeartbeat(){
       cout<< "Start checking heartbeat. Now Time: " << now_time << endl;
 
       for(int i=0; i<cluster_db.size(); i++){
-        cout<< ">checking cluster[" << i+1 << "]"<< endl;
+        int clusterID = i+1;
+        cout<< ">checking cluster[" << clusterID << "]"<< endl;
         for(auto s = cluster_db[i]->begin(); s != cluster_db[i]->end(); ++s){
           cout<< ">>checking server,ID:" << s->serverID << endl;
           v_mutex.lock();
@@ -330,6 +331,12 @@ void checkHeartbeat(){
               if(s->type == "M"){
                 // remove failed Master
                 cout<< "Master server failed! " << endl;
+                // remove master server folder
+                string folder = "./server_M_" + to_string(clusterID) + "_" + to_string(s->serverID);
+                if(std::filesystem::remove_all(folder)){
+                  cout<< "=> remove folder: " << folder << endl;
+                }
+                // remove the server from the cluster
                 cluster_db[i]->erase(s);
                 // find slave and make it become master
                 int serverIdx = findServerIdxByType(*cluster_db[i], "S");

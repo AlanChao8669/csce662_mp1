@@ -51,6 +51,7 @@
 
 #include "sns.grpc.pb.h"
 #include "utils.h"
+#include <regex>
 
 #include "coordinator.grpc.pb.h" // mp2.1
 
@@ -101,10 +102,13 @@ string server_directroy_path;
 int clusterID;
 int serverID;
 bool isMaster;
+bool slave_connected = false;
 string slaveAddr;
 std::unique_ptr<SNSService::Stub> slave_stub_; // master use this to pass request to slave
 vector<string> readLines(int userID, string fileType);
 bool registerSlave(int clusterID);
+bool sync_with_Master();
+std::mutex v_mutex;
 
 // find the index of the user in the client db by username
 int findClientIdx(string username){
@@ -165,19 +169,39 @@ class SNSServiceImpl final : public SNSService::Service {
       cout<< "Pass follow request to slave server" << slaveAddr << endl;
       if(slaveAddr.empty()){
         cout<< "Slave server addr is empty!" << endl;
-      }
-      // Follow
-      ClientContext context;
-      Request request;
-      Reply reply;
-      request.set_username(username);
-      request.add_arguments(follow_username);
-      Status status2 = slave_stub_->Follow(&context, request, &reply);
-      if(status2.ok()){
-        cout<< "Slave server follow success." << endl;
+        // try to register slave server
+        if(registerSlave(clusterID)){
+          // Follow
+          ClientContext context;
+          Request request;
+          Reply reply;
+          request.set_username(username);
+          request.add_arguments(follow_username);
+          Status status2 = slave_stub_->Follow(&context, request, &reply);
+          if(status2.ok()){
+            cout<< "Slave server follow success." << endl;
+          }else{
+            cout<< "Slave server follow failed." << endl;
+          }
+        }else{
+          cout<< "Slave server not available now." << endl;
+          return Status::OK;
+        }
       }else{
-        cout<< "Slave server follow failed." << endl;
+        // Follow
+        ClientContext context;
+        Request request;
+        Reply reply;
+        request.set_username(username);
+        request.add_arguments(follow_username);
+        Status status2 = slave_stub_->Follow(&context, request, &reply);
+        if(status2.ok()){
+          cout<< "Slave server follow success." << endl;
+        }else{
+          cout<< "Slave server follow failed." << endl;
+        }
       }
+      
     }
 
     return Status::OK;
@@ -232,7 +256,6 @@ class SNSServiceImpl final : public SNSService::Service {
     string reply_msg;
     // check if the user is already in client_db
     int user_idx = findClientIdx(username);
-    bool reconnect = false;
 
     if(user_idx == -1){ // user not found in client_db
       reply_msg = "registered new user successfully.";
@@ -255,11 +278,10 @@ class SNSServiceImpl final : public SNSService::Service {
       // update client timeline connection status
       Client* user = &client_db[user_idx];
       user->timeline_connected = false;
-      reconnect = true;
     }
     cout<< username + " " + reply_msg << endl;
 
-    if(isMaster && !reconnect){ // Master server should pass the request to Slave server
+    if(isMaster){ // Master server should pass the request to Slave server
       // ask the coordinator for the slave server's address
       ClientContext context;
       ServerInfo serverInfo;
@@ -273,6 +295,7 @@ class SNSServiceImpl final : public SNSService::Service {
         // passes the request to Slave server
         std::shared_ptr<Channel> channel2 = grpc::CreateChannel(slaveAddr, grpc::InsecureChannelCredentials());
         slave_stub_ = SNSService::NewStub(channel2,grpc::StubOptions());
+        slave_connected = true;
         cout << "Complete creating a slave server stub." << endl;
         // Login
         ClientContext context;
@@ -305,9 +328,11 @@ class SNSServiceImpl final : public SNSService::Service {
     ClientContext c_context;
     if(isMaster){
       if(slaveAddr.empty()){
-        registerSlave(clusterID);
+        slave_connected = registerSlave(clusterID);
       }
-      slave_stream = shared_ptr<ClientReaderWriter<Message, Message>>(slave_stub_->Timeline(&c_context));
+      if(slave_connected){
+        slave_stream = shared_ptr<ClientReaderWriter<Message, Message>>(slave_stub_->Timeline(&c_context));
+      }
     }
 
     // thread that keeps reading messages from the client
@@ -315,6 +340,7 @@ class SNSServiceImpl final : public SNSService::Service {
       while(stream->Read(&msg)){
         cout <<"[Timeline] Receive Post From["+msg.username()+"]: " <<msg.msg()<<endl;
         // use a message buffer to store the posts from user
+        v_mutex.lock();
         Message temp_msg;
         google::protobuf::Timestamp* timestamp = new google::protobuf::Timestamp();
         timestamp->set_seconds(std::time(nullptr));
@@ -325,9 +351,11 @@ class SNSServiceImpl final : public SNSService::Service {
         temp_msg.set_username(msg.username());
         temp_msg.set_msg(msg.msg());
         msg_buffer.push_back(temp_msg);
+        v_mutex.unlock();
         if(isMaster){
           if(slaveAddr.empty()){
-            if(registerSlave(clusterID)){
+            slave_connected = registerSlave(clusterID);
+            if(slave_connected){
               ClientContext c_context;
               slave_stream = shared_ptr<ClientReaderWriter<Message, Message>>(slave_stub_->Timeline(&c_context));
               slave_stream->Write(temp_msg);
@@ -342,8 +370,8 @@ class SNSServiceImpl final : public SNSService::Service {
 
     // thread that keeps processing messages in the buffer every 5 sec
     thread process([&userID, stream, &msg_buffer](){
+      sleep(2); // sleep first so that the post can be stored into the msg buffer
       while(1){
-        sleep(5);  // sleep first so that the post can be stored into the msg buffer
         cout<< "[Timeline] Start check timeline message buffer." << endl;
         while (!msg_buffer.empty()){        
           Message msg = msg_buffer.front();
@@ -406,7 +434,7 @@ class SNSServiceImpl final : public SNSService::Service {
                     break;
                   }
                   cout<< "[Timeline] Check user "<< userID <<"'s timeline every 5 sec." << endl;
-                  cout<< "output_position:" << output_position << endl;
+                  cout<< userID << " output_position:" << output_position << endl;
                   // read user's timeline file
                   vector<string> lines = readLines(userID, "timeline");
                   // start output new posts to client
@@ -464,7 +492,7 @@ class SNSServiceImpl final : public SNSService::Service {
           cout<< "[Timeline] User " << to_string(userID) << " reconnect and NOT in timeline mode." << endl;
           break;
         }
-        
+        sleep(5);
       }// END of while(1)
       cout<< "[Timeline] End process() timeline msg buffer." << endl;
     });
@@ -512,6 +540,11 @@ void sendHeartbeat(string coordinatorAddr, string clusterId, string serverId){
       if(confirmation.type() == "M"){
         isMaster = true;
         cout<< "Server has became the Master!" << endl;
+        // change the server directory 
+        string old_path = server_directroy_path;
+        server_directroy_path = "./server_M_" + clusterId + "_" + serverId;
+        copyFiles(old_path, server_directroy_path);
+        fs::remove_all(old_path);
       }
     }
 
@@ -568,10 +601,15 @@ void RunServer(string clusterId, string serverId, string coordinatorIP, string c
     cout<< "Server registered as: " << confirmation.type() << endl;
     if(confirmation.type() == "M"){
       isMaster = true;
-      server_directroy_path = "server_M_" + clusterId + "_" + serverId;
+      server_directroy_path = "./server_M_" + clusterId + "_" + serverId;
     }else{
       isMaster = false;
-      server_directroy_path = "server_S_" + clusterId + "_" + serverId;
+      server_directroy_path = "./server_S_" + clusterId + "_" + serverId;
+      // sync all the data with the Master server
+      cout<< "Sync all data with the Master server." << endl;
+      // TODO: cahnge the implementation
+      sync_with_Master();
+      cout<< "Sync complete." << endl;
     }
   }
 
@@ -662,6 +700,44 @@ bool registerSlave(int clusterID){
   // Register the Slave server
   std::shared_ptr<Channel> channel2 = grpc::CreateChannel(slaveAddr, grpc::InsecureChannelCredentials());
   slave_stub_ = SNSService::NewStub(channel2,grpc::StubOptions());
+  slave_connected = true;
   cout << "Complete creating a slave server stub." << endl;
   return true;
 }
+
+bool sync_with_Master(){
+  // find the master server's folder
+  string folder = "server_M_" + to_string(clusterID) + "_.*";
+  regex pattern(folder);
+  bool targetFolderFound = false;
+  fs::path targetFolder;
+
+  // Iterate over all entries in the current directory
+  for (const auto& entry : fs::recursive_directory_iterator(".")) {
+
+      // Check if the entry is a directory
+      if (entry.is_directory()) {
+          const fs::path path = entry.path();
+
+          // Check if the directory name matches the pattern
+          if (regex_match(path.filename().string(), pattern)) {
+              // Store the path of the target folder
+              targetFolder = path;
+              targetFolderFound = true;
+              break;
+          }
+      }
+  }
+
+  if (targetFolderFound) {
+      // Copy the target folder to "server_b"
+      fs::copy(targetFolder, server_directroy_path, fs::copy_options::recursive);
+      std::cout << "Sync folder: " << targetFolder << " to " << server_directroy_path << std::endl;
+  } else {
+      std::cout << "Master folder not found" << std::endl;
+      return false;
+  }
+
+  return true;
+}
+
